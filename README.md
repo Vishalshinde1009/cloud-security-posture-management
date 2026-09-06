@@ -89,6 +89,8 @@ project-ESE/
 ├── docs/                       # Architectural and technical documentation
 │   ├── architecture.md         # Detailed pipeline and component design
 │   ├── database.md             # Database architecture, schema models, and migrations
+│   ├── authentication.md       # JWT authentication and password security specification
+│   ├── rbac.md                 # Role-Based Access Control and permissions matrix
 │   ├── security.md             # Security design and baseline threat model
 │   ├── development.md          # Local developer workflow and verification
 │   └── aws-setup.md            # Read-only IAM policy and AWS onboarding guide
@@ -103,18 +105,24 @@ project-ESE/
 │   │   │   ├── session.py      # SessionLocal & get_db dependency
 │   │   │   └── seed.py         # Development seed script
 │   │   ├── api/                # REST API routers
-│   │   │   └── health.py       # Healthcheck endpoint
+│   │   │   ├── health.py       # Healthcheck endpoint
+│   │   │   ├── auth.py         # Login, logout, me, and RBAC endpoints
+│   │   │   └── deps.py         # JWT and RBAC FastAPI dependencies
 │   │   ├── models/             # 13 SQLAlchemy 2.0 ORM models
-│   │   ├── schemas/            # Pydantic validation schemas (Phase 3)
-│   │   ├── services/           # Business logic services (Phase 3)
+│   │   ├── schemas/            # Pydantic validation schemas
+│   │   ├── services/           # Business logic & auth service
 │   │   └── scanner/            # CSPM Discovery, Collection, and Rule Engine (Phase 4-8)
 │   ├── alembic/                # Alembic database migration versions
-│   ├── tests/                  # Pytest test suite (health & database tests)
+│   ├── tests/                  # Pytest test suite (health, database, and auth tests)
 │   ├── requirements.txt        # Python dependencies
 │   └── Dockerfile              # Backend container definition
 └── frontend/                   # React + TypeScript + Vite + Tailwind Frontend
     ├── src/
-    │   ├── App.tsx             # Main dashboard UI
+    │   ├── App.tsx             # Main router & dashboard shell
+    │   ├── pages/Login.tsx     # SOC cybersecurity login page
+    │   ├── context/AuthContext # Centralized JWT authentication state
+    │   ├── components/         # Route guards and UI components
+    │   ├── services/api.ts     # Axios client with auth interceptor
     │   ├── main.tsx            # React DOM mounting
     │   └── index.css           # Tailwind styles and custom dark theme
     ├── public/                 # Static assets & favicon
@@ -132,8 +140,8 @@ project-ESE/
 | :--- | :--- | :--- |
 | **Phase 1** | Repository Setup, Architecture Skeleton, Health APIs & Docker Baseline | **COMPLETED** |
 | **Phase 2** | Database Layer & SQLAlchemy Models | **COMPLETED** |
-| **Phase 3** | Authentication & RBAC | *Pending Approval* |
-| **Phase 4** | Mock Scanner Engine | *Pending* |
+| **Phase 3** | Authentication & RBAC | **COMPLETED** |
+| **Phase 4** | Mock Scanner Engine | *Pending Approval* |
 | **Phase 5** | Configurable Rule Engine Core | *Pending* |
 | **Phase 6** | Explainable Risk & Posture Scoring | *Pending* |
 | **Phase 7** | AWS Read-Only Client Integration | *Pending* |
@@ -146,6 +154,7 @@ project-ESE/
 | **Phase 14** | Audit Logging & Event Trail | *Pending* |
 | **Phase 15** | Automated Testing & Hardening | *Pending* |
 | **Phase 16** | Dockerization Finalization & Docs Completion | *Pending* |
+
 
 
 ---

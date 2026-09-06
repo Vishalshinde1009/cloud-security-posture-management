@@ -5,8 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.api.health import router as health_router
+from app.api.auth import router as auth_router
 
 logger = setup_logging()
+
 
 
 @asynccontextmanager
@@ -52,6 +54,8 @@ async def add_security_headers(request: Request, call_next):
 # Include Routers - accessible at both /health and /api/health
 app.include_router(health_router)
 app.include_router(health_router, prefix=settings.API_V1_STR)
+app.include_router(auth_router, prefix=settings.API_V1_STR)
+
 
 
 @app.get(f"{settings.API_V1_STR}/docs", include_in_schema=False)
