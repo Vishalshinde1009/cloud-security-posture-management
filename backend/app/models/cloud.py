@@ -65,6 +65,8 @@ class Scan(Base, UUIDMixin):
     medium_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     low_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     security_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    posture_rating: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    risk_summary: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(

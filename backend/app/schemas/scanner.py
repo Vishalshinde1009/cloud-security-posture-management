@@ -22,10 +22,27 @@ class ScanResponse(BaseModel):
     medium_count: int
     low_count: int
     security_score: Optional[float] = None
+    posture_rating: Optional[str] = None
+    risk_summary: Dict[str, Any] = Field(default_factory=dict)
     error_message: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ScanComparisonResponse(BaseModel):
+    has_previous_scan: bool
+    current_scan_id: str
+    previous_scan_id: Optional[str] = None
+    score_change: float
+    risk_change: float
+    new_findings: int
+    resolved_findings: int
+    persistent_findings: int
+    previous_security_score: Optional[float] = None
+    current_security_score: Optional[float] = None
+    previous_posture_rating: Optional[str] = None
+    current_posture_rating: Optional[str] = None
 
 
 class ScanListResponse(BaseModel):

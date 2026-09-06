@@ -12,8 +12,32 @@ export interface Scan {
   medium_count: number;
   low_count: number;
   security_score: number | null;
+  posture_rating?: 'EXCELLENT' | 'GOOD' | 'MODERATE' | 'POOR' | 'CRITICAL' | null;
+  risk_summary?: {
+    avg_risk: number;
+    max_risk: number;
+    immediate_count: number;
+    high_priority_count: number;
+    medium_priority_count: number;
+    low_priority_count: number;
+  };
   error_message: string | null;
   created_at: string;
+}
+
+export interface ScanComparison {
+  has_previous_scan: boolean;
+  current_scan_id: string;
+  previous_scan_id: string | null;
+  score_change: number;
+  risk_change: number;
+  new_findings: number;
+  resolved_findings: number;
+  persistent_findings: number;
+  previous_security_score: number | null;
+  current_security_score: number | null;
+  previous_posture_rating: string | null;
+  current_posture_rating: string | null;
 }
 
 export interface ScanListResponse {

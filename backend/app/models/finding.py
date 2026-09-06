@@ -66,6 +66,11 @@ class Finding(Base, UUIDMixin, TimestampMixin):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     severity: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
     risk_score: Mapped[float] = mapped_column(Float, index=True, nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(50), default="MEDIUM", index=True, nullable=False)
+    risk_priority: Mapped[str] = mapped_column(String(50), default="MEDIUM", index=True, nullable=False)
+    risk_factors: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    risk_explanation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    risk_calculated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="OPEN", index=True, nullable=False)
     remediation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

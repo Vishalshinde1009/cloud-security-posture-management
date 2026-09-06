@@ -92,6 +92,8 @@ project-ESE/
 │   ├── authentication.md       # JWT authentication and password security specification
 │   ├── rbac.md                 # Role-Based Access Control and permissions matrix
 │   ├── security.md             # Security design and baseline threat model
+│   ├── security-rules.md       # Complete catalog of 26 detection rules & CIS benchmarks
+│   ├── risk-scoring.md         # Explainable 6-factor risk scoring & posture assessment model
 │   ├── development.md          # Local developer workflow and verification
 │   └── aws-setup.md            # Read-only IAM policy and AWS onboarding guide
 ├── backend/                    # FastAPI Python Backend
@@ -143,7 +145,7 @@ project-ESE/
 | **Phase 3** | Authentication & RBAC | **COMPLETED** |
 | **Phase 4** | Safe Mock CSPM Scanner & Resource Discovery | **COMPLETED** |
 | **Phase 5** | CSPM Security Rule Engine & Misconfiguration Detection | **COMPLETED** |
-| **Phase 6** | Explainable Risk & Posture Scoring | *Pending* |
+| **Phase 6** | Explainable Risk & Posture Scoring | **COMPLETED** |
 | **Phase 7** | AWS Read-Only Client Integration | *Pending* |
 | **Phase 8** | AWS Security Rules (S3, IAM, EC2, Network, CloudTrail, RDS) | *Pending* |
 | **Phase 9** | Background Scan Execution & Lifecycle APIs | *Pending* |

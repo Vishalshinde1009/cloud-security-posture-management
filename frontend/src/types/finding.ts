@@ -32,6 +32,19 @@ export interface Finding {
   description: string;
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
   risk_score: number;
+  risk_level: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
+  risk_priority: 'IMMEDIATE' | 'HIGH' | 'MEDIUM' | 'LOW';
+  risk_factors?: {
+    severity: number;
+    exposure: number;
+    asset_criticality: number;
+    exploitability: number;
+    data_sensitivity: number;
+    config_weakness: number;
+    reasons?: Record<string, string>;
+  };
+  risk_explanation?: string;
+  risk_calculated_at?: string;
   status: 'OPEN' | 'RESOLVED' | 'SUPPRESSED';
   remediation: string | null;
   first_detected: string;

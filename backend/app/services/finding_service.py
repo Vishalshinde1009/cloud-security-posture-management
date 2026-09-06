@@ -9,6 +9,7 @@ from app.models.cloud import CloudAccount, Scan, Resource
 from app.models.base import utc_now
 from app.scanner.rules.registry import default_registry
 from app.scanner.rules.executor import FindingCandidate
+from app.scanner.risk.service import RiskScoringService
 
 logger = logging.getLogger("cspm.services.findings")
 
@@ -108,7 +109,18 @@ class FindingService:
                 continue
 
             severity = candidate.result.severity or candidate.rule.severity
-            base_score = SEVERITY_BASE_SCORES.get(severity.upper(), 50.0)
+
+            # Deterministic, explainable risk scoring via RiskScoringService
+            risk_calc = RiskScoringService.calculate_finding_risk(
+                severity=severity,
+                resource_type=db_resource.resource_type,
+                resource_name=db_resource.resource_name,
+                tags=db_resource.tags or {},
+                configuration=db_resource.configuration or {},
+                evidence=candidate.result.evidence or {},
+                rule_id=db_rule.rule_id,
+                title=candidate.rule.title,
+            )
 
             # Check if an existing finding exists for this account & fingerprint
             existing = db.query(Finding).filter(
@@ -123,7 +135,12 @@ class FindingService:
                 existing.resolved_at = None
                 existing.evidence = candidate.result.evidence
                 existing.severity = severity
-                existing.risk_score = base_score
+                existing.risk_score = risk_calc["risk_score"]
+                existing.risk_level = risk_calc["risk_level"]
+                existing.risk_priority = risk_calc["risk_priority"]
+                existing.risk_factors = risk_calc["risk_factors"]
+                existing.risk_explanation = risk_calc["risk_explanation"]
+                existing.risk_calculated_at = now
                 existing.remediation = candidate.result.remediation or candidate.rule.remediation
                 active_findings.append(existing)
             else:
@@ -137,7 +154,12 @@ class FindingService:
                     title=candidate.rule.title,
                     description=candidate.result.reason or candidate.rule.description,
                     severity=severity,
-                    risk_score=base_score,
+                    risk_score=risk_calc["risk_score"],
+                    risk_level=risk_calc["risk_level"],
+                    risk_priority=risk_calc["risk_priority"],
+                    risk_factors=risk_calc["risk_factors"],
+                    risk_explanation=risk_calc["risk_explanation"],
+                    risk_calculated_at=now,
                     status="OPEN",
                     remediation=candidate.result.remediation or candidate.rule.remediation,
                     evidence=candidate.result.evidence,
@@ -212,6 +234,10 @@ class FindingService:
         status: Optional[str] = None,
         rule_id: Optional[str] = None,
         resource_id: Optional[uuid.UUID] = None,
+        risk_level: Optional[str] = None,
+        risk_priority: Optional[str] = None,
+        min_risk_score: Optional[float] = None,
+        max_risk_score: Optional[float] = None,
         search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
@@ -233,6 +259,14 @@ class FindingService:
             query = query.filter(SecurityRule.rule_id == rule_id.upper())
         if resource_id:
             query = query.filter(Finding.resource_id == resource_id)
+        if risk_level:
+            query = query.filter(Finding.risk_level == risk_level.upper())
+        if risk_priority:
+            query = query.filter(Finding.risk_priority == risk_priority.upper())
+        if min_risk_score is not None:
+            query = query.filter(Finding.risk_score >= min_risk_score)
+        if max_risk_score is not None:
+            query = query.filter(Finding.risk_score <= max_risk_score)
         if search:
             search_pattern = f"%{search.strip()}%"
             query = query.filter(
@@ -246,7 +280,7 @@ class FindingService:
             )
 
         total = query.count()
-        findings = query.order_by(desc(Finding.created_at)).offset(offset).limit(limit).all()
+        findings = query.order_by(desc(Finding.risk_score), desc(Finding.created_at)).offset(offset).limit(limit).all()
 
         enriched = []
         for f in findings:
@@ -261,6 +295,11 @@ class FindingService:
                 "description": f.description,
                 "severity": f.severity,
                 "risk_score": f.risk_score,
+                "risk_level": f.risk_level,
+                "risk_priority": f.risk_priority,
+                "risk_factors": f.risk_factors or {},
+                "risk_explanation": f.risk_explanation,
+                "risk_calculated_at": f.risk_calculated_at,
                 "status": f.status,
                 "remediation": f.remediation,
                 "first_detected": f.first_detected,
@@ -293,6 +332,11 @@ class FindingService:
             "description": f.description,
             "severity": f.severity,
             "risk_score": f.risk_score,
+            "risk_level": f.risk_level,
+            "risk_priority": f.risk_priority,
+            "risk_factors": f.risk_factors or {},
+            "risk_explanation": f.risk_explanation,
+            "risk_calculated_at": f.risk_calculated_at,
             "status": f.status,
             "remediation": f.remediation,
             "evidence": f.evidence,

@@ -26,9 +26,13 @@ flowchart TD
     H -->|Input Assets| I[RuleExecutor]
     J[RuleRegistry: 26 Rules] -->|Applicable Rules| I
     I -->|Finding Candidates| K[FindingService]
+    K -->|Calculate 6-Factor Risk| R[RiskScoringService]
+    R -->|Contextual Risk Scores| K
     K -->|Deterministic Deduplication| L[(Database: findings)]
     K -->|Recalculate Status| H
-    K -->|State: COMPLETED + Metrics| C
+    B -->|Compute Posture Score| R
+    R -->|Posture & Rating| B
+    B -->|State: COMPLETED + Metrics| C
     B -->|Audit Trail| M[(Database: audit_logs)]
 ```
 

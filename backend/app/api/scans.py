@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.database.session import get_db
 from app.models.auth import User
 from app.api.deps import get_current_user, require_role, get_client_ip
-from app.schemas.scanner import ScanCreate, ScanResponse, ScanListResponse
+from app.schemas.scanner import ScanCreate, ScanResponse, ScanListResponse, ScanComparisonResponse
 from app.services.scan_service import ScanService
 
 logger = logging.getLogger("cspm.api.scans")
@@ -93,3 +93,23 @@ def get_scan(
             detail=f"Scan with ID '{scan_id}' not found.",
         )
     return scan
+
+
+@router.get("/{scan_id}/comparison", response_model=ScanComparisonResponse)
+def compare_scan(
+    scan_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Computes historical security posture progression and drift between this scan
+    and its immediate predecessor for the same cloud account.
+    """
+    try:
+        comparison = ScanService.compare_scan_by_id(db=db, scan_id=scan_id)
+        return comparison
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(ve),
+        )

@@ -40,6 +40,11 @@ class FindingResponse(BaseModel):
     description: str
     severity: str
     risk_score: float
+    risk_level: str = "MEDIUM"
+    risk_priority: str = "MEDIUM"
+    risk_factors: Dict[str, Any] = Field(default_factory=dict)
+    risk_explanation: Optional[str] = None
+    risk_calculated_at: Optional[datetime] = None
     status: str
     remediation: Optional[str] = None
     first_detected: datetime
