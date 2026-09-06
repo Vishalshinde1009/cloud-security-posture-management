@@ -14,13 +14,17 @@ import {
   Eye,
   Sliders,
   Layers,
-  Radio
+  Radio,
+  ShieldAlert,
+  BookOpen
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Login } from './pages/Login';
 import { Scans } from './pages/Scans';
 import { Resources } from './pages/Resources';
+import { Findings } from './pages/Findings';
+import { Rules } from './pages/Rules';
 import api from './services/api';
 
 interface HealthData {
@@ -164,6 +168,34 @@ function AppLayout() {
           >
             <Layers className="w-3.5 h-3.5" />
             Discovered Assets
+          </NavLink>
+
+          <NavLink
+            to="/findings"
+            className={({ isActive }) =>
+              `px-4 py-3 text-xs font-medium border-b-2 transition-colors flex items-center gap-2 ${
+                isActive
+                  ? 'border-blue-500 text-white bg-blue-500/5'
+                  : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-700'
+              }`
+            }
+          >
+            <ShieldAlert className="w-3.5 h-3.5" />
+            Findings
+          </NavLink>
+
+          <NavLink
+            to="/rules"
+            className={({ isActive }) =>
+              `px-4 py-3 text-xs font-medium border-b-2 transition-colors flex items-center gap-2 ${
+                isActive
+                  ? 'border-blue-500 text-white bg-blue-500/5'
+                  : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-700'
+              }`
+            }
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            Security Rules
           </NavLink>
         </div>
       </nav>
@@ -377,6 +409,8 @@ function App() {
             <Route path="/dashboard" element={<DashboardContent />} />
             <Route path="/scans" element={<Scans />} />
             <Route path="/resources" element={<Resources />} />
+            <Route path="/findings" element={<Findings />} />
+            <Route path="/rules" element={<Rules />} />
           </Route>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

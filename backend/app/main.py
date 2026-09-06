@@ -8,6 +8,8 @@ from app.api.health import router as health_router
 from app.api.auth import router as auth_router
 from app.api.scans import router as scans_router
 from app.api.resources import router as resources_router
+from app.api.findings import router as findings_router
+from app.api.rules import router as rules_router
 
 logger = setup_logging()
 
@@ -59,6 +61,8 @@ app.include_router(health_router, prefix=settings.API_V1_STR)
 app.include_router(auth_router, prefix=settings.API_V1_STR)
 app.include_router(scans_router, prefix=settings.API_V1_STR)
 app.include_router(resources_router, prefix=settings.API_V1_STR)
+app.include_router(findings_router, prefix=settings.API_V1_STR)
+app.include_router(rules_router, prefix=settings.API_V1_STR)
 
 
 

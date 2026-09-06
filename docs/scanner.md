@@ -22,10 +22,14 @@ flowchart TD
     E -.->|CSPM_MODE=aws| G[AWSProvider Boto3]
     F -->|DiscoveredResource[]| D
     G -->|DiscoveredResource[]| D
-    D -->|Baseline Classification| B
-    B -->|Upsert Assets| H[(Database: resources)]
-    B -->|State: COMPLETED + Metrics| C
-    B -->|Audit Trail| I[(Database: audit_logs)]
+    D -->|Persist Inventory| H[(Database: resources)]
+    H -->|Input Assets| I[RuleExecutor]
+    J[RuleRegistry: 26 Rules] -->|Applicable Rules| I
+    I -->|Finding Candidates| K[FindingService]
+    K -->|Deterministic Deduplication| L[(Database: findings)]
+    K -->|Recalculate Status| H
+    K -->|State: COMPLETED + Metrics| C
+    B -->|Audit Trail| M[(Database: audit_logs)]
 ```
 
 ### Discovery Lifecycle States

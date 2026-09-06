@@ -142,7 +142,7 @@ project-ESE/
 | **Phase 2** | Database Layer & SQLAlchemy Models | **COMPLETED** |
 | **Phase 3** | Authentication & RBAC | **COMPLETED** |
 | **Phase 4** | Safe Mock CSPM Scanner & Resource Discovery | **COMPLETED** |
-| **Phase 5** | Configurable Rule Engine Core | *Pending* |
+| **Phase 5** | CSPM Security Rule Engine & Misconfiguration Detection | **COMPLETED** |
 | **Phase 6** | Explainable Risk & Posture Scoring | *Pending* |
 | **Phase 7** | AWS Read-Only Client Integration | *Pending* |
 | **Phase 8** | AWS Security Rules (S3, IAM, EC2, Network, CloudTrail, RDS) | *Pending* |

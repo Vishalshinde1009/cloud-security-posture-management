@@ -5,11 +5,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, func, or_
 
 from app.models.cloud import CloudAccount, Scan, Resource
+from app.models.finding import SecurityRule
 from app.models.auth import User
 from app.models.audit import AuditLog
 from app.models.base import utc_now
 from app.scanner.providers.mock.provider import MockProvider
 from app.scanner.engine.scanner import ScannerEngine
+from app.scanner.rules.executor import RuleExecutor
+from app.services.finding_service import FindingService
 
 logger = logging.getLogger("cspm.scanner")
 
@@ -97,14 +100,11 @@ class ScanService:
             # Run Discovery Pipeline
             discovered_items = engine.run_discovery_pipeline()
 
+            # Upsert Resource records
             now = utc_now()
-            at_risk_count = 0
-
+            scanned_resource_ids = set()
             for item in discovered_items:
-                if item.security_status == "AT_RISK":
-                    at_risk_count += 1
-
-                # Upsert Resource record tied to this cloud account
+                scanned_resource_ids.add(item.resource_id)
                 existing_res = db.query(Resource).filter(
                     Resource.cloud_account_id == account.id,
                     Resource.resource_id == item.resource_id,
@@ -116,7 +116,6 @@ class ScanService:
                     existing_res.region = item.region
                     existing_res.tags = item.tags
                     existing_res.configuration = item.configuration
-                    existing_res.security_status = item.security_status
                     existing_res.last_seen = now
                 else:
                     new_res = Resource(
@@ -130,11 +129,36 @@ class ScanService:
                         region=item.region,
                         tags=item.tags,
                         configuration=item.configuration,
-                        security_status=item.security_status,
+                        security_status="UNKNOWN",
                         first_seen=now,
                         last_seen=now,
                     )
                     db.add(new_res)
+
+            db.commit()
+
+            # Ensure rules are synchronized in DB
+            FindingService.sync_security_rules_to_db(db)
+
+            # Query any disabled rule IDs from database
+            disabled_db_rules = db.query(SecurityRule.rule_id).filter(SecurityRule.enabled == False).all()
+            disabled_rule_ids = {r[0] for r in disabled_db_rules}
+
+            # Execute Security Rules
+            executor = RuleExecutor()
+            candidates, exec_errors = executor.execute_rules(discovered_items, disabled_rule_ids=disabled_rule_ids)
+
+            # Persist Findings with deterministic deduplication & drift tracking
+            active_findings, crit_c, high_c, med_c, low_c = FindingService.persist_finding_candidates(
+                db=db,
+                scan=scan,
+                account=account,
+                candidates=candidates,
+                scanned_resource_ids=scanned_resource_ids,
+            )
+
+            # Recalculate resource security status (CRITICAL, AT_RISK, SECURE)
+            FindingService.update_resource_security_statuses(db, account.id)
 
             # Tally metrics
             total_scanned = len(discovered_items)
@@ -144,16 +168,22 @@ class ScanService:
                 started = started.replace(tzinfo=completed_time.tzinfo)
             duration_secs = (completed_time - started).total_seconds() if started else 0.0
 
-            # Baseline demonstration score calculation
-            security_score = 100.0
-            if total_scanned > 0:
-                secure_count = total_scanned - at_risk_count
-                security_score = round((secure_count / total_scanned) * 100.0, 1)
+            # Calculate posture score based on percentage of secure assets
+            secure_assets_count = db.query(Resource).filter(
+                Resource.cloud_account_id == account.id,
+                Resource.security_status == "SECURE",
+            ).count()
+            security_score = round((secure_assets_count / total_scanned) * 100.0, 1) if total_scanned > 0 else 100.0
 
             scan.status = "COMPLETED"
             scan.completed_at = completed_time
             scan.duration = round(duration_secs, 2)
             scan.resources_scanned = total_scanned
+            scan.findings_count = len(active_findings)
+            scan.critical_count = crit_c
+            scan.high_count = high_c
+            scan.medium_count = med_c
+            scan.low_count = low_c
             scan.security_score = security_score
 
             # Audit log
