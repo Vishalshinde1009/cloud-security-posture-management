@@ -88,6 +88,7 @@ project-ESE/
 ├── README.md                   # System documentation and setup guide
 ├── docs/                       # Architectural and technical documentation
 │   ├── architecture.md         # Detailed pipeline and component design
+│   ├── database.md             # Database architecture, schema models, and migrations
 │   ├── security.md             # Security design and baseline threat model
 │   ├── development.md          # Local developer workflow and verification
 │   └── aws-setup.md            # Read-only IAM policy and AWS onboarding guide
@@ -97,20 +98,18 @@ project-ESE/
 │   │   ├── core/               # Configuration, security, logging
 │   │   │   ├── config.py       # Pydantic Settings
 │   │   │   ├── logging.py      # Structured SOC logging
-│   │   │   └── security.py     # Password hashing & JWT auth
-│   │   ├── database/           # SQLAlchemy session and models
+│   │   │   └── security.py     # Bcrypt password hashing & JWT auth
+│   │   ├── database/           # SQLAlchemy session, Base, and seed data
+│   │   │   ├── session.py      # SessionLocal & get_db dependency
+│   │   │   └── seed.py         # Development seed script
 │   │   ├── api/                # REST API routers
 │   │   │   └── health.py       # Healthcheck endpoint
-│   │   ├── models/             # ORM database entities (Phase 2)
-│   │   ├── schemas/            # Pydantic validation schemas (Phase 2)
+│   │   ├── models/             # 13 SQLAlchemy 2.0 ORM models
+│   │   ├── schemas/            # Pydantic validation schemas (Phase 3)
 │   │   ├── services/           # Business logic services (Phase 3)
 │   │   └── scanner/            # CSPM Discovery, Collection, and Rule Engine (Phase 4-8)
-│   │       ├── providers/      # AWS and Mock provider adapters
-│   │       ├── discovery/      # Resource discovery
-│   │       ├── collectors/     # Per-service metadata collectors
-│   │       ├── rules/          # 20+ security rule implementations
-│   │       └── engine/         # Rule evaluation pipeline
-│   ├── tests/                  # Pytest test suite
+│   ├── alembic/                # Alembic database migration versions
+│   ├── tests/                  # Pytest test suite (health & database tests)
 │   ├── requirements.txt        # Python dependencies
 │   └── Dockerfile              # Backend container definition
 └── frontend/                   # React + TypeScript + Vite + Tailwind Frontend
@@ -132,8 +131,8 @@ project-ESE/
 | Phase | Description | Status |
 | :--- | :--- | :--- |
 | **Phase 1** | Repository Setup, Architecture Skeleton, Health APIs & Docker Baseline | **COMPLETED** |
-| **Phase 2** | Database Layer & SQLAlchemy Models | *Pending Approval* |
-| **Phase 3** | Authentication & RBAC | *Pending* |
+| **Phase 2** | Database Layer & SQLAlchemy Models | **COMPLETED** |
+| **Phase 3** | Authentication & RBAC | *Pending Approval* |
 | **Phase 4** | Mock Scanner Engine | *Pending* |
 | **Phase 5** | Configurable Rule Engine Core | *Pending* |
 | **Phase 6** | Explainable Risk & Posture Scoring | *Pending* |
@@ -147,6 +146,7 @@ project-ESE/
 | **Phase 14** | Audit Logging & Event Trail | *Pending* |
 | **Phase 15** | Automated Testing & Hardening | *Pending* |
 | **Phase 16** | Dockerization Finalization & Docs Completion | *Pending* |
+
 
 ---
 
