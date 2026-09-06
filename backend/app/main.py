@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.logging import setup_logging
@@ -21,9 +22,9 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     description="Automated Cloud Misconfiguration Detection and Risk Assessment Platform",
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    docs_url=f"{settings.API_V1_STR}/docs",
-    redoc_url=f"{settings.API_V1_STR}/redoc",
+    openapi_url="/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc",
     lifespan=lifespan,
 )
 
@@ -48,15 +49,32 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
-# Include Routers
+# Include Routers - accessible at both /health and /api/health
+app.include_router(health_router)
 app.include_router(health_router, prefix=settings.API_V1_STR)
+
+
+@app.get(f"{settings.API_V1_STR}/docs", include_in_schema=False)
+def get_api_docs_redirect():
+    return RedirectResponse(url="/docs")
+
+
+@app.get(f"{settings.API_V1_STR}/redoc", include_in_schema=False)
+def get_api_redoc_redirect():
+    return RedirectResponse(url="/redoc")
+
+
+@app.get(f"{settings.API_V1_STR}/openapi.json", include_in_schema=False)
+def get_api_openapi_redirect():
+    return RedirectResponse(url="/openapi.json")
 
 
 @app.get("/")
 def root():
     return {
         "message": f"Welcome to {settings.PROJECT_NAME} API",
-        "docs": f"{settings.API_V1_STR}/docs",
-        "health": f"{settings.API_V1_STR}/health",
+        "docs": "/docs",
+        "health": "/health",
         "mode": settings.CSPM_MODE,
     }
+

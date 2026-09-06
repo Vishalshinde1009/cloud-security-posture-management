@@ -88,6 +88,8 @@ project-ESE/
 ├── README.md                   # System documentation and setup guide
 ├── docs/                       # Architectural and technical documentation
 │   ├── architecture.md         # Detailed pipeline and component design
+│   ├── security.md             # Security design and baseline threat model
+│   ├── development.md          # Local developer workflow and verification
 │   └── aws-setup.md            # Read-only IAM policy and AWS onboarding guide
 ├── backend/                    # FastAPI Python Backend
 │   ├── app/
@@ -99,10 +101,10 @@ project-ESE/
 │   │   ├── database/           # SQLAlchemy session and models
 │   │   ├── api/                # REST API routers
 │   │   │   └── health.py       # Healthcheck endpoint
-│   │   ├── models/             # ORM database entities
-│   │   ├── schemas/            # Pydantic validation schemas
-│   │   ├── services/           # Business logic services
-│   │   └── scanner/            # CSPM Discovery, Collection, and Rule Engine
+│   │   ├── models/             # ORM database entities (Phase 2)
+│   │   ├── schemas/            # Pydantic validation schemas (Phase 2)
+│   │   ├── services/           # Business logic services (Phase 3)
+│   │   └── scanner/            # CSPM Discovery, Collection, and Rule Engine (Phase 4-8)
 │   │       ├── providers/      # AWS and Mock provider adapters
 │   │       ├── discovery/      # Resource discovery
 │   │       ├── collectors/     # Per-service metadata collectors
@@ -125,14 +127,37 @@ project-ESE/
 
 ---
 
-## 4. Quickstart Guide
+## 4. Implementation Roadmap & Current Status
+
+| Phase | Description | Status |
+| :--- | :--- | :--- |
+| **Phase 1** | Repository Setup, Architecture Skeleton, Health APIs & Docker Baseline | **COMPLETED** |
+| **Phase 2** | Database Layer & SQLAlchemy Models | *Pending Approval* |
+| **Phase 3** | Authentication & RBAC | *Pending* |
+| **Phase 4** | Mock Scanner Engine | *Pending* |
+| **Phase 5** | Configurable Rule Engine Core | *Pending* |
+| **Phase 6** | Explainable Risk & Posture Scoring | *Pending* |
+| **Phase 7** | AWS Read-Only Client Integration | *Pending* |
+| **Phase 8** | AWS Security Rules (S3, IAM, EC2, Network, CloudTrail, RDS) | *Pending* |
+| **Phase 9** | Background Scan Execution & Lifecycle APIs | *Pending* |
+| **Phase 10** | SOC Dashboard UI & Metrics | *Pending* |
+| **Phase 11** | Findings, Inventory, and Scan History UI | *Pending* |
+| **Phase 12** | CIS Benchmark Compliance Mapping | *Pending* |
+| **Phase 13** | PDF Security Report Generation | *Pending* |
+| **Phase 14** | Audit Logging & Event Trail | *Pending* |
+| **Phase 15** | Automated Testing & Hardening | *Pending* |
+| **Phase 16** | Dockerization Finalization & Docs Completion | *Pending* |
+
+---
+
+## 5. Quickstart Guide
 
 ### Prerequisites
 - Python 3.11+
 - Node.js 18+ and npm
 - Docker and Docker Compose (optional, for full containerized deployment)
 
-### 4.1 Running with Docker Compose
+### 5.1 Running with Docker Compose
 ```bash
 # 1. Copy environment template
 cp .env.example .env
@@ -141,9 +166,9 @@ cp .env.example .env
 docker-compose up --build
 ```
 - Frontend: `http://localhost:3000`
-- Backend API Docs: `http://localhost:8000/api/docs`
+- Backend API Docs: `http://localhost:8000/docs` (or `http://localhost:8000/api/docs`)
 
-### 4.2 Running Locally (Development Mode)
+### 5.2 Running Locally (Development Mode)
 
 #### Backend Setup:
 ```bash
@@ -179,7 +204,8 @@ Visit `http://localhost:5173` to access the application.
 
 ---
 
-## 5. Security & Academic Integrity
+## 6. Security & Academic Integrity
 1. **No Hardcoded Secrets**: All keys, passwords, and tokens are read exclusively from environment variables or IAM roles.
 2. **Auditability**: All actions are logged with timestamp, user identity, action, and target resource.
 3. **Transparent Scoring**: Risk scores are calculated using clear mathematical formulas rather than arbitrary numbers.
+
