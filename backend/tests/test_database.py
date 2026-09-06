@@ -15,6 +15,8 @@ from app.models.report import Report
 from app.models.notification import Notification
 
 
+from sqlalchemy import event
+
 @pytest.fixture(scope="function")
 def db_session():
     """Provides a clean, fully isolated in-memory database session for each test."""
@@ -22,6 +24,13 @@ def db_session():
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
     )
+
+    @event.listens_for(test_engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     Base.metadata.create_all(bind=test_engine)
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
     session = TestingSessionLocal()
@@ -31,6 +40,7 @@ def db_session():
     finally:
         session.close()
         Base.metadata.drop_all(bind=test_engine)
+
 
 
 def test_db_connection_and_session_lifecycle(db_session):
@@ -412,3 +422,26 @@ def test_audit_log_and_operational_entities(db_session):
 
     saved_notif = db_session.query(Notification).filter(Notification.user_id == user.id).first()
     assert saved_notif.status == "UNREAD"
+
+
+def test_restricted_deletion_protects_historical_scans_and_findings(db_session):
+    """Test 11: Verify ondelete='RESTRICT' prevents accidental cascade deletion of scans and findings."""
+    account = CloudAccount(name="Protected Account", account_identifier="acc-protected-999")
+    db_session.add(account)
+    db_session.flush()
+
+    scan = Scan(cloud_account_id=account.id, status="COMPLETED")
+    db_session.add(scan)
+    db_session.commit()
+
+    # Attempting to delete account must raise IntegrityError due to ondelete="RESTRICT"
+    db_session.delete(account)
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
+
+    # Verify scan still exists in database
+    persisted_scan = db_session.query(Scan).filter(Scan.id == scan.id).first()
+    assert persisted_scan is not None
+    assert persisted_scan.status == "COMPLETED"
+
