@@ -6,6 +6,8 @@ from app.core.config import settings
 from app.core.logging import setup_logging
 from app.api.health import router as health_router
 from app.api.auth import router as auth_router
+from app.api.scans import router as scans_router
+from app.api.resources import router as resources_router
 
 logger = setup_logging()
 
@@ -55,6 +57,8 @@ async def add_security_headers(request: Request, call_next):
 app.include_router(health_router)
 app.include_router(health_router, prefix=settings.API_V1_STR)
 app.include_router(auth_router, prefix=settings.API_V1_STR)
+app.include_router(scans_router, prefix=settings.API_V1_STR)
+app.include_router(resources_router, prefix=settings.API_V1_STR)
 
 
 

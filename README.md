@@ -141,7 +141,7 @@ project-ESE/
 | **Phase 1** | Repository Setup, Architecture Skeleton, Health APIs & Docker Baseline | **COMPLETED** |
 | **Phase 2** | Database Layer & SQLAlchemy Models | **COMPLETED** |
 | **Phase 3** | Authentication & RBAC | **COMPLETED** |
-| **Phase 4** | Mock Scanner Engine | *Pending Approval* |
+| **Phase 4** | Safe Mock CSPM Scanner & Resource Discovery | **COMPLETED** |
 | **Phase 5** | Configurable Rule Engine Core | *Pending* |
 | **Phase 6** | Explainable Risk & Posture Scoring | *Pending* |
 | **Phase 7** | AWS Read-Only Client Integration | *Pending* |
