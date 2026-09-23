@@ -4,6 +4,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
+from pydantic import BaseModel
+
 from app.database.session import get_db
 from app.models.auth import User
 from app.api.deps import get_current_user
@@ -67,3 +69,38 @@ def get_rule(
             detail=f"Security rule '{rule_identifier}' not found.",
         )
     return rule
+
+
+class RuleToggleRequest(BaseModel):
+    enabled: bool
+
+
+@router.patch("/{rule_identifier}/toggle", response_model=SecurityRuleResponse)
+def toggle_rule(
+    rule_identifier: str,
+    payload: RuleToggleRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Enables or disables a security detection rule.
+    Restricted to ADMIN users only.
+    """
+    user_roles = [r.name for r in current_user.roles]
+    if "ADMIN" not in user_roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Only administrators can modify security rule operational status.",
+        )
+
+    try:
+        FindingService.sync_security_rules_to_db(db)
+        rule = FindingService.toggle_rule(
+            db=db,
+            rule_identifier=rule_identifier,
+            enabled=payload.enabled,
+            user=current_user,
+        )
+        return rule
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

@@ -8,13 +8,180 @@
 
 body {
   margin: 0;
-  background-color: #0B0F19;
+  background-color: #070B12;
   color: #F3F4F6;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow-x: hidden;
 }
 
 code, pre {
   font-family: 'JetBrains Mono', monospace;
+}
+
+/* 3D Perspective & Transform utilities */
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.perspective-1200 {
+  perspective: 1200px;
+}
+
+.perspective-1500 {
+  perspective: 1500px;
+}
+
+/* =========================================================================
+   PHYSICAL MATERIAL SYSTEM (Engineered Hardware Product Render Quality)
+   ========================================================================= */
+
+/* Dark Anodized Aluminum / Machined Chassis */
+.chassis-steel {
+  background: 
+    linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, transparent 40%),
+    linear-gradient(175deg, #111B28 0%, #080D15 100%);
+  border: 1px solid #1F3046;
+  box-shadow: 
+    0 24px 48px -12px rgba(0, 0, 0, 0.95),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.8),
+    inset 1px 0 0 rgba(255, 255, 255, 0.04),
+    inset -1px 0 0 rgba(0, 0, 0, 0.6);
+}
+
+/* Brushed Metal with directional anisotropic sheen */
+.graphite-metal {
+  background: 
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.012) 0px, rgba(255,255,255,0.012) 1px, transparent 1px, transparent 3px),
+    linear-gradient(155deg, #131E2D 0%, #0A111A 100%);
+  border: 1px solid #24354A;
+  box-shadow: 
+    0 12px 28px -6px rgba(0, 0, 0, 0.85), 
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.8);
+}
+
+/* Contact Shadow - ground anchoring */
+.contact-shadow-sm {
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.9)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8));
+}
+
+.contact-shadow-md {
+  filter: drop-shadow(0 14px 20px rgba(0, 0, 0, 0.95)) drop-shadow(0 4px 6px rgba(0, 0, 0, 0.85));
+}
+
+.contact-shadow-lg {
+  filter: drop-shadow(0 24px 35px rgba(0, 0, 0, 0.98)) drop-shadow(0 8px 12px rgba(0, 0, 0, 0.9));
+}
+
+/* Recessed Hardware Bay with true inner bevel */
+.recessed-bay {
+  background: #04070D;
+  border: 1px solid #121C2A;
+  box-shadow: 
+    inset 0 3px 8px rgba(0, 0, 0, 0.9), 
+    inset 0 -1px 2px rgba(255, 255, 255, 0.03),
+    0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Smoked glass panel for hardware enclosures (low opacity, subtle specular edge) */
+.smoked-glass {
+  background: rgba(13, 20, 32, 0.78);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(40, 58, 80, 0.7);
+  box-shadow: 
+    0 18px 40px -12px rgba(0, 0, 0, 0.8), 
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 15px rgba(0, 0, 0, 0.5);
+}
+
+/* Data-center raised floor tiles with precision reflection */
+.datacenter-floor {
+  background-image: 
+    linear-gradient(to right, rgba(28, 41, 58, 0.25) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(28, 41, 58, 0.25) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Architectural equipment grid */
+.architectural-grid {
+  background-image: 
+    linear-gradient(to right, rgba(36, 50, 68, 0.15) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(36, 50, 68, 0.15) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Precise Hardware LEDs - tight localized point diffusion, NO giant halos */
+.led-cyan {
+  box-shadow: 0 0 4px rgba(34, 211, 238, 0.85);
+}
+
+.led-emerald {
+  box-shadow: 0 0 4px rgba(52, 211, 153, 0.85);
+}
+
+.led-amber {
+  box-shadow: 0 0 4px rgba(245, 158, 11, 0.85);
+}
+
+.led-rose {
+  box-shadow: 0 0 4px rgba(244, 63, 94, 0.85);
+}
+
+/* Fiber optic & conduit data flow animations */
+@keyframes conduit-flow {
+  0% {
+    stroke-dashoffset: 60;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.animate-conduit {
+  animation: conduit-flow 4s linear infinite;
+}
+
+/* Subtle hardware fan / ventilation pattern */
+.hardware-vent {
+  background-image: radial-gradient(circle, #04070C 1.2px, transparent 1.2px);
+  background-size: 5px 5px;
+}
+
+/* Precision manufactured screw heads */
+.screw-head {
+  width: 5.5px;
+  height: 5.5px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #566981 0%, #15202E 100%);
+  border: 0.5px solid #080D15;
+  box-shadow: inset 0 0.5px 0.5px rgba(255, 255, 255, 0.25), 0 0.5px 1px rgba(0, 0, 0, 0.9);
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.screw-head::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 15%;
+  right: 15%;
+  height: 0.8px;
+  background: #080D15;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+/* Glassmorphism panel */
+.glass-panel {
+  background: rgba(15, 23, 36, 0.75);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(36, 50, 68, 0.65);
 }
 
 /* Custom scrollbar for modern SOC dashboard */
@@ -23,12 +190,24 @@ code, pre {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0B0F19;
+  background: #070B12;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1F2937;
+  background: #1E293B;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #374151;
+  background: #334155;
+}
+
+/* Accessibility: respect user preference for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

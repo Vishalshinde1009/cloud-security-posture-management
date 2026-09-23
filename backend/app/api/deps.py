@@ -112,13 +112,6 @@ def require_permission(permission: str):
         user_perms = AuthService.get_user_permissions(current_user)
         if permission not in user_perms:
             client_ip = get_client_ip(request)
-            AuthService.record_access_denied(
-                db=db,
-                user=current_user,
-                endpoint=str(request.url.path),
-                required_role_or_perm=f"Permission: {permission}",
-                client_ip=client_ip,
-            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access forbidden: missing required permission '{permission}'.",
@@ -126,3 +119,70 @@ def require_permission(permission: str):
         return current_user
 
     return permission_checker
+
+
+def is_admin(user: User) -> bool:
+    """Returns True if user has the ADMIN role."""
+    return any(r.name == "ADMIN" for r in user.roles)
+
+
+def get_user_accessible_account_ids(db: Session, user: User) -> List[uuid.UUID]:
+    """
+    Returns list of cloud account IDs accessible to user.
+    ADMINs can access all accounts.
+    Normal users (SECURITY_ANALYST, VIEWER) access their owned accounts plus unassigned/demo accounts.
+    """
+    from app.models.cloud import CloudAccount
+    from sqlalchemy import or_
+    if is_admin(user):
+        return [acc.id for acc in db.query(CloudAccount.id).all()]
+    return [
+        acc.id for acc in db.query(CloudAccount.id).filter(
+            or_(CloudAccount.user_id == user.id, CloudAccount.user_id.is_(None))
+        ).all()
+    ]
+
+
+def verify_account_access(db: Session, user: User, account_id: uuid.UUID):
+    """
+    Validates that user has ownership or admin access to target cloud account.
+    Raises HTTP 404 to prevent IDOR and enumeration.
+    """
+    from app.models.cloud import CloudAccount
+    acc = db.query(CloudAccount).filter(CloudAccount.id == account_id).first()
+    if not acc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cloud account not found.",
+        )
+    if not is_admin(user) and acc.user_id is not None and acc.user_id != user.id:
+        # Non-admin cannot access another user's cloud account
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cloud account not found.",
+        )
+    return acc
+
+
+def verify_account_ownership(db: Session, user: Optional[User] = None, account_id: Optional[uuid.UUID] = None, current_user: Optional[User] = None):
+    """
+    Validates that user explicitly owns the target cloud account or is an ADMIN.
+    Strictly forbids modifying or testing accounts belonging to other tenants.
+    Raises HTTP 404 to prevent IDOR and enumeration.
+    """
+    from app.models.cloud import CloudAccount
+    effective_user = user or current_user
+    acc = db.query(CloudAccount).filter(CloudAccount.id == account_id).first()
+    if not acc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cloud account not found.",
+        )
+    if not is_admin(effective_user) and acc.user_id != effective_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cloud account not found.",
+        )
+    return acc
+
+

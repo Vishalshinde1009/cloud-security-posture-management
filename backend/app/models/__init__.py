@@ -7,6 +7,7 @@ from app.models.compliance import ComplianceControl, FindingCompliance
 from app.models.audit import AuditLog
 from app.models.report import Report
 from app.models.notification import Notification
+from app.models.monitoring import MonitoringConfig, SecurityAlert
 
 __all__ = [
     "Base",
@@ -28,4 +29,6 @@ __all__ = [
     "AuditLog",
     "Report",
     "Notification",
+    "MonitoringConfig",
+    "SecurityAlert",
 ]

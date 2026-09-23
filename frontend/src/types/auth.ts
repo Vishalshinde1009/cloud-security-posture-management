@@ -5,6 +5,7 @@ export interface User {
   roles: string[];
   permissions?: string[];
   is_active: boolean;
+  email_alerts_enabled?: boolean;
   last_login?: string | null;
 }
 
@@ -27,5 +28,6 @@ export interface UserMeResponse {
   roles: string[];
   permissions: string[];
   is_active: boolean;
+  email_alerts_enabled?: boolean;
   last_login?: string | null;
 }

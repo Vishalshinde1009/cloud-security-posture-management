@@ -445,3 +445,84 @@ def test_restricted_deletion_protects_historical_scans_and_findings(db_session):
     assert persisted_scan is not None
     assert persisted_scan.status == "COMPLETED"
 
+
+def test_seed_database_synchronizes_existing_admin_role_permissions(db_session):
+    """
+    Test 12: Regression Test - Seed synchronization of existing roles.
+    Verifies that:
+    1. An existing ADMIN role missing 'cloud_accounts:manage' receives it upon seed_database().
+    2. SECURITY_ANALYST and VIEWER roles do NOT receive 'cloud_accounts:manage'.
+    3. Multiple sequential runs of seed_database() are completely idempotent and do not duplicate entities.
+    """
+    from app.database.seed import seed_database
+    from app.services.auth_service import AuthService
+
+    # 1. Simulate legacy database state: ADMIN role exists with only basic read:findings
+    p_read = Permission(id=uuid.uuid4(), name="read:findings", description="Read findings")
+    db_session.add(p_read)
+    db_session.flush()
+
+    old_admin_role = Role(id=uuid.uuid4(), name="ADMIN", description="Legacy Admin Role")
+    old_admin_role.permissions = [p_read]
+    db_session.add(old_admin_role)
+
+    admin_user = User(
+        id=uuid.uuid4(),
+        username="admin",
+        email="admin@cspm-security.local",
+        password_hash="fakehash",
+        is_active=True,
+    )
+    admin_user.roles.append(old_admin_role)
+    db_session.add(admin_user)
+    db_session.commit()
+
+    # Precondition: ADMIN does not have cloud_accounts:manage
+    admin_perms_before = AuthService.get_user_permissions(admin_user)
+    assert "cloud_accounts:manage" not in admin_perms_before
+    assert "read:findings" in admin_perms_before
+
+    # 2. Run seed_database
+    seed_database(db=db_session)
+
+    # 3. Postcondition: ADMIN now has cloud_accounts:manage
+    db_session.refresh(old_admin_role)
+    db_session.refresh(admin_user)
+
+    admin_perms_after = AuthService.get_user_permissions(admin_user)
+    assert "cloud_accounts:manage" in admin_perms_after
+    assert "read:findings" in admin_perms_after
+    assert "run:scans" in admin_perms_after
+
+    # Verify SECURITY_ANALYST and VIEWER do NOT have cloud_accounts:manage
+    analyst_role = db_session.query(Role).filter(Role.name == "SECURITY_ANALYST").first()
+    viewer_role = db_session.query(Role).filter(Role.name == "VIEWER").first()
+    assert analyst_role is not None
+    assert viewer_role is not None
+
+    analyst_perm_names = [p.name for p in analyst_role.permissions]
+    viewer_perm_names = [p.name for p in viewer_role.permissions]
+    assert "cloud_accounts:manage" not in analyst_perm_names
+    assert "cloud_accounts:manage" not in viewer_perm_names
+
+    # 4. Verify Idempotence: Run seed_database a second time
+    role_count_1 = db_session.query(Role).count()
+    perm_count_1 = db_session.query(Permission).count()
+    user_count_1 = db_session.query(User).count()
+
+    seed_database(db=db_session)
+
+    role_count_2 = db_session.query(Role).count()
+    perm_count_2 = db_session.query(Permission).count()
+    user_count_2 = db_session.query(User).count()
+
+    assert role_count_1 == role_count_2 == 3
+    assert perm_count_1 == perm_count_2 == 10
+    assert user_count_1 == user_count_2 == 3
+
+    # Check that permissions list has no duplicates
+    db_session.refresh(old_admin_role)
+    admin_perm_names = [p.name for p in old_admin_role.permissions]
+    assert len(admin_perm_names) == len(set(admin_perm_names))
+    assert "cloud_accounts:manage" in admin_perm_names
+

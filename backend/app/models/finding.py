@@ -95,6 +95,11 @@ class Finding(Base, UUIDMixin, TimestampMixin):
         "Notification",
         back_populates="finding",
     )
+    notes: Mapped[List["FindingNote"]] = relationship(
+        "FindingNote",
+        back_populates="finding",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index("ix_findings_scan_severity", "scan_id", "severity"),
@@ -105,3 +110,29 @@ class Finding(Base, UUIDMixin, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<Finding(id={self.id}, rule='{self.rule_id}', severity='{self.severity}', status='{self.status}')>"
+
+
+class FindingNote(Base, UUIDMixin):
+    __tablename__ = "finding_notes"
+
+    finding_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("findings.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    author_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    author_username: Mapped[str] = mapped_column(String(100), nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    # Relationships
+    finding: Mapped["Finding"] = relationship("Finding", back_populates="notes")
+
+    def __repr__(self) -> str:
+        return f"<FindingNote(id={self.id}, finding_id={self.finding_id}, author='{self.author_username}')>"

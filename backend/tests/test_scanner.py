@@ -244,15 +244,19 @@ def test_scan_service_failure_isolation(db_session, tokens):
 
 
 def test_api_trigger_scan_rbac_enforcement(client, tokens):
-    """Verify RBAC on POST /api/scans: VIEWER receives 403; ANALYST and ADMIN receive 201."""
-    # VIEWER -> 403 Forbidden
+    """Verify RBAC and authorization on POST /api/scans: unauthenticated rejected (401); authenticated users receive 201."""
+    # Unauthenticated -> 401 Unauthorized
+    res_anon = client.post("/api/scans", json={})
+    assert res_anon.status_code == 401
+
+    # VIEWER -> 201 Created on accessible account
     res_viewer = client.post(
         "/api/scans",
         json={},
         headers={"Authorization": f"Bearer {tokens['viewer']}"},
     )
-    assert res_viewer.status_code == 403
-    assert "Access forbidden" in res_viewer.json()["detail"]
+    assert res_viewer.status_code == 201
+    assert res_viewer.json()["status"] == "COMPLETED"
 
     # ANALYST -> 201 Created
     res_analyst = client.post(
@@ -389,3 +393,245 @@ def test_mock_mode_safe_labeling(client, tokens, db_session):
     items = res.json()["items"]
     for item in items:
         assert item["provider"] == "MOCK"
+
+
+def test_aws_inventory_scoped_by_account_id(client, tokens, db_session):
+    """Verifies that filtering by AWS cloud_account_id returns only AWS assets and strictly excludes mock assets."""
+    from app.models.cloud import CloudAccount, Scan, Resource
+
+    # 1. Create a mock account with resources
+    mock_account = CloudAccount(
+        name="Demo Environment",
+        provider="MOCK",
+        account_identifier="mock-12345",
+        default_region="us-east-1",
+        credential_mode="MOCK",
+        is_active=True,
+    )
+    db_session.add(mock_account)
+    db_session.flush()
+
+    mock_scan = Scan(
+        cloud_account_id=mock_account.id,
+        status="COMPLETED",
+        resources_scanned=1,
+    )
+    db_session.add(mock_scan)
+    db_session.flush()
+
+    mock_res = Resource(
+        cloud_account_id=mock_account.id,
+        scan_id=mock_scan.id,
+        resource_id="arn:aws:s3:::mock-bucket-alpha",
+        resource_name="mock-bucket-alpha",
+        service="S3",
+        resource_type="s3_bucket",
+        region="us-east-1",
+        provider="MOCK",
+        security_status="PASSING",
+        configuration={"mock": True},
+    )
+    db_session.add(mock_res)
+
+    # 2. Create a real AWS account with resources
+    aws_account = CloudAccount(
+        name="Audit Target",
+        provider="AWS",
+        account_identifier="123456789012",
+        default_region="eu-north-1",
+        credential_mode="ENVIRONMENT",
+        is_active=True,
+    )
+    db_session.add(aws_account)
+    db_session.flush()
+
+    aws_scan = Scan(
+        cloud_account_id=aws_account.id,
+        status="COMPLETED",
+        resources_scanned=1,
+    )
+    db_session.add(aws_scan)
+    db_session.flush()
+
+    aws_res = Resource(
+        cloud_account_id=aws_account.id,
+        scan_id=aws_scan.id,
+        resource_id="arn:aws:s3:::real-production-audit-bucket",
+        resource_name="real-production-audit-bucket",
+        service="S3",
+        resource_type="s3_bucket",
+        region="eu-north-1",
+        provider="AWS",
+        security_status="AT_RISK",
+        configuration={"BucketName": "real-production-audit-bucket"},
+    )
+    db_session.add(aws_res)
+    db_session.commit()
+
+    # Query resources for AWS account via account_id
+    res_aws = client.get(
+        f"/api/resources?account_id={aws_account.id}",
+        headers={"Authorization": f"Bearer {tokens['viewer']}"},
+    )
+    assert res_aws.status_code == 200
+    data_aws = res_aws.json()
+    assert data_aws["total"] == 1
+    assert data_aws["items"][0]["resource_name"] == "real-production-audit-bucket"
+    assert data_aws["items"][0]["provider"] == "AWS"
+    assert data_aws["items"][0]["region"] == "eu-north-1"
+
+    # Query resources for AWS account via cloud_account_id alias
+    res_aws_alias = client.get(
+        f"/api/resources?cloud_account_id={aws_account.id}",
+        headers={"Authorization": f"Bearer {tokens['viewer']}"},
+    )
+    assert res_aws_alias.status_code == 200
+    assert res_aws_alias.json()["total"] == 1
+    assert res_aws_alias.json()["items"][0]["resource_name"] == "real-production-audit-bucket"
+
+    # Query resources for Mock account
+    res_mock = client.get(
+        f"/api/resources?account_id={mock_account.id}",
+        headers={"Authorization": f"Bearer {tokens['viewer']}"},
+    )
+    assert res_mock.status_code == 200
+    data_mock = res_mock.json()
+    assert data_mock["total"] == 1
+    assert data_mock["items"][0]["resource_name"] == "mock-bucket-alpha"
+    assert data_mock["items"][0]["provider"] == "MOCK"
+
+
+def test_cross_account_and_scan_isolation(client, tokens, db_session):
+    """Verifies that resources strictly map to their respective scan_id and cloud_account_id without leaking."""
+    from app.models.cloud import CloudAccount, Scan, Resource
+
+    acc = CloudAccount(
+        name="Target Isolation Acc",
+        provider="AWS",
+        account_identifier="111222333444",
+        default_region="eu-north-1",
+        credential_mode="ENVIRONMENT",
+        is_active=True,
+    )
+    db_session.add(acc)
+    db_session.flush()
+
+    scan1 = Scan(cloud_account_id=acc.id, status="COMPLETED")
+    scan2 = Scan(cloud_account_id=acc.id, status="COMPLETED")
+    db_session.add_all([scan1, scan2])
+    db_session.flush()
+
+    res1 = Resource(
+        cloud_account_id=acc.id,
+        scan_id=scan1.id,
+        resource_id="arn:aws:iam::111222333444:user/Alice",
+        resource_name="Alice",
+        service="IAM",
+        resource_type="iam_user",
+        region="global",
+        provider="AWS",
+        security_status="PASSING",
+        configuration={},
+    )
+    res2 = Resource(
+        cloud_account_id=acc.id,
+        scan_id=scan2.id,
+        resource_id="arn:aws:iam::111222333444:user/Bob",
+        resource_name="Bob",
+        service="IAM",
+        resource_type="iam_user",
+        region="global",
+        provider="AWS",
+        security_status="PASSING",
+        configuration={},
+    )
+    db_session.add_all([res1, res2])
+    db_session.commit()
+
+    # Query by scan1
+    r_scan1 = client.get(
+        f"/api/resources?scan_id={scan1.id}",
+        headers={"Authorization": f"Bearer {tokens['viewer']}"},
+    )
+    assert r_scan1.status_code == 200
+    items1 = r_scan1.json()["items"]
+    assert len(items1) == 1
+    assert items1[0]["resource_name"] == "Alice"
+
+    # Query by scan2
+    r_scan2 = client.get(
+        f"/api/resources?scan_id={scan2.id}",
+        headers={"Authorization": f"Bearer {tokens['viewer']}"},
+    )
+    assert r_scan2.status_code == 200
+    items2 = r_scan2.json()["items"]
+    assert len(items2) == 1
+    assert items2[0]["resource_name"] == "Bob"
+
+
+def test_mode_aware_default_resource_resolution(client, tokens, db_session):
+    """Verifies that when account_id is omitted and CSPM_MODE is aws, active AWS account resources are chosen over mock."""
+    from app.models.cloud import CloudAccount, Scan, Resource
+    from app.core.config import settings
+
+    mock_acc = CloudAccount(
+        name="Demo AWS Environment",
+        provider="MOCK",
+        account_identifier="mock-sim",
+        default_region="us-east-1",
+        credential_mode="MOCK",
+        is_active=True,
+    )
+    aws_acc = CloudAccount(
+        name="Audit Target",
+        provider="AWS",
+        account_identifier="999888777666",
+        default_region="eu-north-1",
+        credential_mode="ENVIRONMENT",
+        is_active=True,
+    )
+    db_session.add_all([mock_acc, aws_acc])
+    db_session.flush()
+
+    s_mock = Scan(cloud_account_id=mock_acc.id, status="COMPLETED")
+    s_aws = Scan(cloud_account_id=aws_acc.id, status="COMPLETED")
+    db_session.add_all([s_mock, s_aws])
+    db_session.flush()
+
+    r_mock = Resource(
+        cloud_account_id=mock_acc.id,
+        scan_id=s_mock.id,
+        resource_id="arn:aws:s3:::simulated-stale-bucket",
+        resource_name="simulated-stale-bucket",
+        service="S3",
+        resource_type="s3_bucket",
+        region="us-east-1",
+        provider="MOCK",
+        security_status="PASSING",
+        configuration={},
+    )
+    r_aws = Resource(
+        cloud_account_id=aws_acc.id,
+        scan_id=s_aws.id,
+        resource_id="arn:aws:s3:::live-aws-active-bucket",
+        resource_name="live-aws-active-bucket",
+        service="S3",
+        resource_type="s3_bucket",
+        region="eu-north-1",
+        provider="AWS",
+        security_status="PASSING",
+        configuration={},
+    )
+    db_session.add_all([r_mock, r_aws])
+    db_session.commit()
+
+    with patch.object(settings, "CSPM_MODE", "aws"):
+        res = client.get(
+            "/api/resources",
+            headers={"Authorization": f"Bearer {tokens['viewer']}"},
+        )
+        assert res.status_code == 200
+        items = res.json()["items"]
+        assert len(items) == 1
+        assert items[0]["resource_name"] == "live-aws-active-bucket"
+        assert items[0]["provider"] == "AWS"

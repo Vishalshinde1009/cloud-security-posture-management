@@ -1,11 +1,17 @@
+import uuid
 import logging
 from typing import Optional, Tuple, List
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
-from app.models.auth import User
+from sqlalchemy import or_, func
+from app.models.auth import User, Role
 from app.models.audit import AuditLog
 from app.models.base import utc_now
-from app.core.security import verify_password, create_access_token
+from app.core.security import (
+    verify_password,
+    create_access_token,
+    validate_password_strength,
+    get_password_hash,
+)
 from app.core.config import settings
 
 logger = logging.getLogger("cspm.auth")
@@ -78,6 +84,89 @@ class AuthService:
 
         logger.info(f"Successful login for user: {user.username} (roles: {[r.name for r in user.roles]})")
         return user, None
+
+    @staticmethod
+    def register_user(
+        db: Session,
+        username: str,
+        email: str,
+        password: str,
+        password_confirm: Optional[str] = None,
+        client_ip: Optional[str] = None,
+    ) -> Tuple[Optional[User], Optional[str]]:
+        """
+        Registers a new public user with safe default role (VIEWER).
+        Validates password strength, email & username uniqueness, and hashes password.
+        Logs an immutable audit event for account registration.
+        """
+        clean_username = username.strip()
+        clean_email = email.strip().lower()
+
+        # 1. Validate password confirmation if provided
+        if password_confirm is not None and password != password_confirm:
+            return None, "Passwords do not match."
+
+        # 2. Validate password strength against NIST/OWASP rules
+        is_strong, strength_err = validate_password_strength(password)
+        if not is_strong:
+            return None, strength_err
+
+        # 3. Check for existing username (case-insensitive)
+        existing_user = db.query(User).filter(
+            func.lower(User.username) == clean_username.lower()
+        ).first()
+        if existing_user:
+            return None, "Username is already registered."
+
+        # 4. Check for existing email (case-insensitive)
+        existing_email = db.query(User).filter(
+            func.lower(User.email) == clean_email
+        ).first()
+        if existing_email:
+            return None, "Email address is already registered."
+
+        # 5. Resolve safe default role (VIEWER) - public registration NEVER grants ADMIN
+        viewer_role = db.query(Role).filter(Role.name == "VIEWER").first()
+        if not viewer_role:
+            logger.warning("Default role VIEWER not found during user registration; attempting creation.")
+            viewer_role = Role(id=uuid.uuid4(), name="VIEWER", description="Viewer role")
+            db.add(viewer_role)
+            db.flush()
+
+        # 6. Hash password securely with bcrypt
+        password_hash = get_password_hash(password)
+
+        # 7. Create new user
+        new_user = User(
+            id=uuid.uuid4(),
+            username=clean_username,
+            email=clean_email,
+            password_hash=password_hash,
+            is_active=True,
+        )
+        new_user.roles.append(viewer_role)
+        db.add(new_user)
+        db.flush()
+
+        # 8. Record audit log entry
+        audit = AuditLog(
+            user_id=new_user.id,
+            action="USER_REGISTER",
+            resource_type="auth",
+            result="SUCCESS",
+            metadata_json={
+                "username": new_user.username,
+                "email": new_user.email,
+                "assigned_role": viewer_role.name,
+            },
+            ip_address=client_ip,
+        )
+        db.add(audit)
+        db.commit()
+        db.refresh(new_user)
+
+        logger.info(f"New user registered successfully: {new_user.username} with role {viewer_role.name}")
+        return new_user, None
 
     @staticmethod
     def create_user_token(user: User) -> str:

@@ -290,6 +290,36 @@ export const Rules = () => {
                   </ul>
                 </div>
               )}
+
+              {/* Admin Operational Toggle */}
+              <div className="p-3 bg-slate-800/60 rounded-lg border border-slate-700 flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-slate-200">Rule Execution Status</div>
+                  <div className="text-[11px] text-slate-400">
+                    {selectedRule.enabled ? 'Evaluated during CSPM scan pipeline' : 'Excluded from scanner pipeline'}
+                  </div>
+                </div>
+                <button
+                  onClick={async () => {
+                    try {
+                      const res = await api.patch(`/rules/${selectedRule.rule_id}/toggle`, {
+                        enabled: !selectedRule.enabled,
+                      });
+                      setSelectedRule(res.data);
+                      fetchRules();
+                    } catch (err: any) {
+                      alert(err.response?.data?.detail || 'Only administrators can toggle detection rules.');
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded text-xs font-semibold font-mono transition ${
+                    selectedRule.enabled
+                      ? 'bg-red-500/20 text-red-400 border border-red-500/40 hover:bg-red-500/30'
+                      : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30'
+                  }`}
+                >
+                  {selectedRule.enabled ? 'Disable Rule' : 'Enable Rule'}
+                </button>
+              </div>
             </div>
 
             <div className="p-4 border-t border-slate-800 bg-slate-800/20 flex justify-end">

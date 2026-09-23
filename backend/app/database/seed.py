@@ -31,7 +31,7 @@ def seed_database(db: Session = None):
             ("write:findings", "Update finding status and remediation notes"),
             ("run:scans", "Trigger on-demand cloud security scans"),
             ("read:scans", "View scan history and metrics"),
-            ("manage:accounts", "Register and configure cloud accounts"),
+            ("cloud_accounts:manage", "Register, configure, and test cloud accounts"),
             ("read:accounts", "View cloud accounts"),
             ("manage:rules", "Enable or disable security detection rules"),
             ("read:rules", "View security detection rules"),
@@ -74,13 +74,19 @@ def seed_database(db: Session = None):
         for role_name, role_desc, role_perms in roles_data:
             role = db.query(Role).filter(Role.name == role_name).first()
             if not role:
-                role = Role(id=uuid.uuid4(), name=role_name, description=role_desc)
-                role.permissions = role_perms
+                role = Role(
+                    id=uuid.uuid4(),
+                    name=role_name,
+                    description=role_desc,
+                )
                 db.add(role)
                 db.flush()
+
+            role.permissions = role_perms
+            role.description = role_desc
             role_objs[role_name] = role
 
-        # 3. Seed Default Admin User
+        # 3. Seed Default Users (Admin, Analyst, Viewer)
         admin_user = db.query(User).filter(User.email == settings.INITIAL_ADMIN_EMAIL).first()
         if not admin_user:
             admin_user = User(
@@ -94,6 +100,43 @@ def seed_database(db: Session = None):
             db.add(admin_user)
             db.flush()
             logger.info(f"Created default admin user: {settings.INITIAL_ADMIN_EMAIL}")
+        else:
+            if role_objs["ADMIN"] not in admin_user.roles:
+                admin_user.roles.append(role_objs["ADMIN"])
+
+        analyst_user = db.query(User).filter(User.username == "analyst").first()
+        if not analyst_user:
+            analyst_user = User(
+                id=uuid.uuid4(),
+                username="analyst",
+                email="analyst@cspm-security.local",
+                password_hash=get_password_hash("AnalystPass123!"),
+                is_active=True,
+            )
+            analyst_user.roles.append(role_objs["SECURITY_ANALYST"])
+            db.add(analyst_user)
+            db.flush()
+            logger.info("Created default analyst user: analyst@cspm-security.local")
+        else:
+            if role_objs["SECURITY_ANALYST"] not in analyst_user.roles:
+                analyst_user.roles.append(role_objs["SECURITY_ANALYST"])
+
+        viewer_user = db.query(User).filter(User.username == "viewer").first()
+        if not viewer_user:
+            viewer_user = User(
+                id=uuid.uuid4(),
+                username="viewer",
+                email="viewer@cspm-security.local",
+                password_hash=get_password_hash("ViewerPass123!"),
+                is_active=True,
+            )
+            viewer_user.roles.append(role_objs["VIEWER"])
+            db.add(viewer_user)
+            db.flush()
+            logger.info("Created default viewer user: viewer@cspm-security.local")
+        else:
+            if role_objs["VIEWER"] not in viewer_user.roles:
+                viewer_user.roles.append(role_objs["VIEWER"])
 
         # 4. Seed Standard Sample Security Rules
         sample_rules = [

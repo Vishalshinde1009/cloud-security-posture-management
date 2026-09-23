@@ -15,9 +15,18 @@ class CloudAccount(Base, UUIDMixin, TimestampMixin):
     account_identifier: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
     default_region: Mapped[str] = mapped_column(String(50), default="us-east-1", nullable=False)
     credential_mode: Mapped[str] = mapped_column(String(50), default="ENVIRONMENT", nullable=False)
+    role_arn: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    external_id: Mapped[Optional[str]] = mapped_column(String(100), index=True, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
 
     # Relationships - Protect security audit history from accidental cascades
+    user: Mapped[Optional["User"]] = relationship("User", back_populates="cloud_accounts")
     scans: Mapped[List["Scan"]] = relationship(
         "Scan",
         back_populates="cloud_account",
@@ -32,6 +41,17 @@ class CloudAccount(Base, UUIDMixin, TimestampMixin):
         "Finding",
         back_populates="cloud_account",
         passive_deletes="all",
+    )
+    monitoring_config: Mapped[Optional["MonitoringConfig"]] = relationship(
+        "MonitoringConfig",
+        back_populates="cloud_account",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    alerts: Mapped[List["SecurityAlert"]] = relationship(
+        "SecurityAlert",
+        back_populates="cloud_account",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:
@@ -81,6 +101,14 @@ class Scan(Base, UUIDMixin):
     resources: Mapped[List["Resource"]] = relationship("Resource", back_populates="scan")
     findings: Mapped[List["Finding"]] = relationship("Finding", back_populates="scan")
     reports: Mapped[List["Report"]] = relationship("Report", back_populates="scan")
+
+    @property
+    def account_name(self) -> Optional[str]:
+        return self.cloud_account.name if self.cloud_account else None
+
+    @property
+    def account_provider(self) -> Optional[str]:
+        return self.cloud_account.provider if self.cloud_account else None
 
     def __repr__(self) -> str:
         return f"<Scan(id={self.id}, status='{self.status}', score={self.security_score})>"

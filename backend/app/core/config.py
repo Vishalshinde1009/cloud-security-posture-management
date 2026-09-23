@@ -47,12 +47,28 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_SESSION_TOKEN: str = ""
     AWS_ASSUME_ROLE_ARN: str = ""
+    AWS_BACKEND_ASSUMER_ROLE_ARN: str = ""
 
     # Risk threshold classifications
     RISK_THRESHOLD_CRITICAL: int = 90
     RISK_THRESHOLD_HIGH: int = 70
     RISK_THRESHOLD_MEDIUM: int = 40
     RISK_THRESHOLD_LOW: int = 0
+
+    # Continuous Monitoring (Phase 9A / 9B)
+    CSPM_MONITORING_ENABLED: bool = False
+    CSPM_MONITORING_INTERVAL_MINUTES: int = 60
+    CSPM_MONITORING_POLL_SECONDS: int = 60   # How often the scheduler thread wakes up to check for due configs
+
+    # Email Security Alerts (Phase 9C)
+    CSPM_EMAIL_ENABLED: bool = False
+    CSPM_SMTP_HOST: str = ""
+    CSPM_SMTP_PORT: int = 587
+    CSPM_SMTP_USERNAME: str = ""
+    CSPM_SMTP_PASSWORD: str = ""
+    CSPM_SMTP_FROM: str = "noreply@cspm-security.local"
+    CSPM_SMTP_USE_TLS: bool = True
+    CSPM_FRONTEND_URL: str = "http://localhost:5173"
 
     model_config = SettingsConfigDict(
         env_file=".env",

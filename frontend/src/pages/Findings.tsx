@@ -10,9 +10,24 @@ import {
   Sliders, 
   Code
 } from 'lucide-react';
+import { resolvePreferredAccountId, getStoredAccountId, setStoredAccountId } from '../utils/accountSelection';
+
+interface CloudAccountOption {
+  id: string;
+  name: string;
+  provider: string;
+  is_active?: boolean;
+  role_arn?: string | null;
+  credential_mode?: string;
+  account_identifier?: string;
+}
 
 export const Findings = () => {
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [accounts, setAccounts] = useState<CloudAccountOption[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(getStoredAccountId());
+  const [systemMode, setSystemMode] = useState<string>('mock');
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,11 +45,34 @@ export const Findings = () => {
 
   const services = ['S3', 'IAM', 'EC2', 'VPC', 'CloudTrail', 'RDS'];
 
+  useEffect(() => {
+    // Fetch backend system mode
+    api.get<{ mode: string }>('/health')
+      .then((res) => {
+        if (res.data?.mode) {
+          setSystemMode(res.data.mode.toLowerCase());
+        }
+      })
+      .catch(() => {});
+
+    // Fetch cloud accounts for targeting
+    api.get<any>('/cloud-accounts')
+      .then((res) => {
+        const items: CloudAccountOption[] = Array.isArray(res.data) ? res.data : (res.data?.items || []);
+        setAccounts(items);
+        const preferredId = resolvePreferredAccountId(items, getStoredAccountId());
+        setSelectedAccountId(preferredId);
+        setStoredAccountId(preferredId);
+      })
+      .catch(() => {});
+  }, []);
+
   const fetchFindings = async () => {
     try {
       setLoading(true);
       setError(null);
       let query = '/findings?limit=50';
+      if (selectedAccountId) query += `&account_id=${encodeURIComponent(selectedAccountId)}`;
       if (selectedSeverity) query += `&severity=${encodeURIComponent(selectedSeverity)}`;
       if (selectedRiskLevel) query += `&risk_level=${encodeURIComponent(selectedRiskLevel)}`;
       if (selectedPriority) query += `&risk_priority=${encodeURIComponent(selectedPriority)}`;
@@ -44,6 +82,7 @@ export const Findings = () => {
 
       const res = await api.get<FindingListResponse>(query);
       setFindings(res.data.items);
+      setTotalCount(res.data.total);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load security findings.');
     } finally {
@@ -53,7 +92,7 @@ export const Findings = () => {
 
   useEffect(() => {
     fetchFindings();
-  }, [selectedSeverity, selectedRiskLevel, selectedPriority, selectedStatus, selectedService]);
+  }, [selectedAccountId, selectedSeverity, selectedRiskLevel, selectedPriority, selectedStatus, selectedService]);
 
   const handleSearchSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -135,23 +174,55 @@ export const Findings = () => {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight text-white">Security Misconfiguration Findings</h1>
-            <span className="px-2.5 py-1 text-xs font-mono font-medium uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 rounded-md">
-              EXPLAINABLE RISK ENGINE ACTIVE
-            </span>
+            {accounts.find(a => a.id === selectedAccountId)?.provider === 'AWS' || (!selectedAccountId && systemMode === 'aws') ? (
+              <span className="px-2.5 py-1 text-xs font-mono font-semibold uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-md flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                AWS FINDINGS
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 text-xs font-mono font-semibold uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 rounded-md">
+                MOCK FINDINGS
+              </span>
+            )}
           </div>
           <p className="mt-1 text-sm text-slate-400">
             Real-time evidence-backed misconfigurations evaluated across 6 risk dimensions with explainable scoring.
+            {totalCount !== null && (
+              <span className="ml-2 font-mono text-xs text-blue-400 font-semibold">({totalCount} Total Issues Identified)</span>
+            )}
           </p>
         </div>
 
-        <button
-          onClick={fetchFindings}
-          disabled={loading}
-          className="px-3.5 py-2 text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 self-start md:self-auto"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          Refresh Findings
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          {accounts.length > 0 && (
+            <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
+              <span className="text-xs text-slate-400 font-medium">Target Account:</span>
+              <select
+                value={selectedAccountId}
+                onChange={(e) => {
+                  setSelectedAccountId(e.target.value);
+                  setStoredAccountId(e.target.value);
+                }}
+                className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-blue-500 font-sans"
+              >
+                {accounts.map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    {acc.name} ({acc.provider})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <button
+            onClick={fetchFindings}
+            disabled={loading}
+            className="px-3.5 py-2 text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 self-start md:self-auto"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh Findings
+          </button>
+        </div>
       </div>
 
       {/* Filter Controls */}
@@ -309,6 +380,16 @@ export const Findings = () => {
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <div className="flex items-center gap-2">
+                        <div className="w-12 bg-slate-800 rounded-full h-1.5 overflow-hidden hidden sm:block">
+                          <div
+                            className={`h-1.5 rounded-full ${
+                              f.risk_score >= 90 ? 'bg-rose-500' :
+                              f.risk_score >= 70 ? 'bg-orange-500' :
+                              f.risk_score >= 40 ? 'bg-amber-400' : 'bg-cyan-400'
+                            }`}
+                            style={{ width: `${Math.min(f.risk_score, 100)}%` }}
+                          />
+                        </div>
                         <span className={`text-sm font-extrabold font-mono ${getRiskScoreColor(f.risk_score)}`}>
                           {f.risk_score}
                         </span>
@@ -570,6 +651,77 @@ export const Findings = () => {
                   Recommended Remediation Guidance
                 </div>
                 <p className="text-slate-300">{inspectingFinding.remediation || 'Review configuration against AWS security guidelines.'}</p>
+              </div>
+
+              {/* Status Update & Analyst Notes Workflow */}
+              <div className="p-4 bg-slate-900/90 rounded-lg border border-slate-800 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                  <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    Finding Lifecycle Management
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-400">Current Status:</span>
+                    <select
+                      value={inspectingFinding.status}
+                      onChange={async (e) => {
+                        const newStatus = e.target.value;
+                        try {
+                          await api.patch(`/findings/${inspectingFinding.id}/status`, {
+                            status: newStatus,
+                            rationale: 'Updated via Security Inspector Console',
+                          });
+                          setInspectingFinding({ ...inspectingFinding, status: newStatus as Finding['status'] });
+                          fetchFindings();
+                        } catch (err: any) {
+                          alert(err.response?.data?.detail || 'Failed to update finding status');
+                        }
+                      }}
+                      className="px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-white font-mono"
+                    >
+                      <option value="OPEN">OPEN</option>
+                      <option value="IN_PROGRESS">IN_PROGRESS</option>
+                      <option value="RESOLVED">RESOLVED</option>
+                      <option value="ACCEPTED_RISK">ACCEPTED_RISK</option>
+                      <option value="FALSE_POSITIVE">FALSE_POSITIVE</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Analyst Notes */}
+                <div className="space-y-2">
+                  <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                    Analyst Investigation Notes
+                  </div>
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      const input = (e.target as any).elements.noteText;
+                      const text = input.value.trim();
+                      if (!text) return;
+                      try {
+                        await api.post(`/findings/${inspectingFinding.id}/notes`, { note: text });
+                        input.value = '';
+                        alert('Note added successfully');
+                      } catch (err: any) {
+                        alert(err.response?.data?.detail || 'Failed to add note');
+                      }
+                    }}
+                    className="flex gap-2"
+                  >
+                    <input
+                      name="noteText"
+                      type="text"
+                      placeholder="Add investigation context, remediation ticket link, or risk waiver..."
+                      className="flex-1 px-3 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                    />
+                    <button
+                      type="submit"
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold"
+                    >
+                      Post Note
+                    </button>
+                  </form>
+                </div>
               </div>
             </div>
 

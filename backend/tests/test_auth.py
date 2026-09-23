@@ -379,3 +379,177 @@ def test_analyst_allowed_on_analyst_endpoint(client):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 200
+
+
+# ------------------------------------------------------------------------------
+# 5. User Registration Endpoint Tests
+# ------------------------------------------------------------------------------
+
+def test_registration_success(client, db_session):
+    resp = client.post(
+        "/api/auth/register",
+        json={
+            "username": "new_sec_user",
+            "email": "new_user@cspm.local",
+            "password": "Secur3P@ssw0rd!",
+            "password_confirm": "Secur3P@ssw0rd!",
+        },
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["message"] == "Account successfully registered. You can now log in."
+    assert data["username"] == "new_sec_user"
+    assert data["email"] == "new_user@cspm.local"
+    assert data["roles"] == ["VIEWER"]
+
+    # Verify user exists in database and password is encrypted with bcrypt
+    created_user = db_session.query(User).filter(User.username == "new_sec_user").first()
+    assert created_user is not None
+    assert created_user.email == "new_user@cspm.local"
+    assert created_user.is_active is True
+    assert created_user.password_hash.startswith("$2b$") or created_user.password_hash.startswith("$2a$")
+    assert "Secur3P@ssw0rd!" not in created_user.password_hash
+
+    # Verify audit log recorded
+    log = db_session.query(AuditLog).filter(
+        AuditLog.action == "USER_REGISTER",
+        AuditLog.user_id == created_user.id
+    ).first()
+    assert log is not None
+    assert log.result == "SUCCESS"
+    assert "Secur3P@ssw0rd!" not in str(log.metadata_json)
+
+
+def test_registration_duplicate_username(client):
+    # First registration
+    client.post(
+        "/api/auth/register",
+        json={
+            "username": "dup_username_user",
+            "email": "user1@cspm.local",
+            "password": "Password123!",
+            "password_confirm": "Password123!",
+        },
+    )
+    # Second attempt with same username
+    resp = client.post(
+        "/api/auth/register",
+        json={
+            "username": "dup_username_user",
+            "email": "user2@cspm.local",
+            "password": "Password123!",
+            "password_confirm": "Password123!",
+        },
+    )
+    assert resp.status_code == 400
+    assert "Username is already registered" in resp.json()["detail"]
+
+
+def test_registration_duplicate_email(client):
+    # First registration
+    client.post(
+        "/api/auth/register",
+        json={
+            "username": "unique_user1",
+            "email": "shared_email@cspm.local",
+            "password": "Password123!",
+            "password_confirm": "Password123!",
+        },
+    )
+    # Second attempt with same email
+    resp = client.post(
+        "/api/auth/register",
+        json={
+            "username": "unique_user2",
+            "email": "shared_email@cspm.local",
+            "password": "Password123!",
+            "password_confirm": "Password123!",
+        },
+    )
+    assert resp.status_code == 400
+    assert "Email address is already registered" in resp.json()["detail"]
+
+
+def test_registration_invalid_email(client):
+    resp = client.post(
+        "/api/auth/register",
+        json={
+            "username": "bad_email_user",
+            "email": "not-an-email",
+            "password": "Password123!",
+            "password_confirm": "Password123!",
+        },
+    )
+    assert resp.status_code in (400, 422)
+
+
+def test_registration_weak_password_no_number_or_special(client):
+    resp = client.post(
+        "/api/auth/register",
+        json={
+            "username": "weak_pwd_user",
+            "email": "weak_pwd@cspm.local",
+            "password": "PasswordOnly",
+            "password_confirm": "PasswordOnly",
+        },
+    )
+    assert resp.status_code == 400
+    assert "digit or special symbol" in resp.json()["detail"]
+
+
+def test_registration_password_mismatch(client):
+    resp = client.post(
+        "/api/auth/register",
+        json={
+            "username": "mismatch_user",
+            "email": "mismatch@cspm.local",
+            "password": "Password123!",
+            "password_confirm": "DifferentPassword123!",
+        },
+    )
+    assert resp.status_code == 400
+    assert "do not match" in resp.json()["detail"]
+
+
+def test_registration_followed_by_login_and_access(client):
+    # 1. Register new user
+    reg_resp = client.post(
+        "/api/auth/register",
+        json={
+            "username": "active_viewer",
+            "email": "active_viewer@cspm.local",
+            "password": "GoodPassword123!",
+            "password_confirm": "GoodPassword123!",
+        },
+    )
+    assert reg_resp.status_code == 201
+
+    # 2. Log in with new credentials
+    login_resp = client.post(
+        "/api/auth/login",
+        json={
+            "username_or_email": "active_viewer",
+            "password": "GoodPassword123!",
+        },
+    )
+    assert login_resp.status_code == 200
+    token = login_resp.json()["access_token"]
+    assert token is not None
+
+    # 3. Access /auth/me
+    me_resp = client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert me_resp.status_code == 200
+    me_data = me_resp.json()
+    assert me_data["username"] == "active_viewer"
+    assert me_data["roles"] == ["VIEWER"]
+
+    # 4. Attempt accessing ADMIN-only endpoint (must be forbidden)
+    admin_resp = client.get(
+        "/api/auth/admin-only",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert admin_resp.status_code == 403
+

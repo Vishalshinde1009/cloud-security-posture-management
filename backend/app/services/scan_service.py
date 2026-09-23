@@ -9,7 +9,10 @@ from app.models.finding import SecurityRule
 from app.models.auth import User
 from app.models.audit import AuditLog
 from app.models.base import utc_now
+from app.core.config import settings
+from app.core.json_utils import to_json_safe
 from app.scanner.providers.mock.provider import MockProvider
+from app.scanner.providers.aws.provider import AWSProvider
 from app.scanner.engine.scanner import ScannerEngine
 from app.scanner.rules.executor import RuleExecutor
 from app.services.finding_service import FindingService
@@ -60,12 +63,37 @@ class ScanService:
         Preserves scan history without overwriting previous runs.
         """
         # Resolve target cloud account
+        from app.api.deps import is_admin
         if account_id:
             account = db.query(CloudAccount).filter(CloudAccount.id == account_id).first()
             if not account:
                 raise ValueError(f"Cloud account with ID {account_id} not found.")
+            if not is_admin(user) and account.user_id != user.id:
+                raise ValueError(f"Cloud account with ID {account_id} not found.")
         else:
-            account = ScanService.get_or_create_demo_account(db)
+            account = None
+            if not is_admin(user):
+                account = db.query(CloudAccount).filter(
+                    CloudAccount.user_id == user.id,
+                    CloudAccount.is_active == True,
+                ).order_by(desc(CloudAccount.created_at)).first()
+                if not account:
+                    account = db.query(CloudAccount).filter(
+                        CloudAccount.user_id.is_(None),
+                        CloudAccount.is_active == True,
+                    ).order_by(desc(CloudAccount.created_at)).first()
+            else:
+                if settings.CSPM_MODE.lower() == "aws":
+                    account = db.query(CloudAccount).filter(
+                        CloudAccount.provider == "AWS",
+                        CloudAccount.is_active == True,
+                    ).order_by(desc(CloudAccount.created_at)).first()
+
+                if not account:
+                    account = ScanService.get_or_create_demo_account(db)
+
+            if not account:
+                account = ScanService.get_or_create_demo_account(db)
 
         # Initialize Scan record in QUEUED state
         scan = Scan(
@@ -90,53 +118,75 @@ class ScanService:
             scan.status = "RUNNING"
             db.commit()
 
-            # Instantiate Provider & Engine
-            # In Phase 4, if provider is MOCK or in mock mode, use MockProvider
-            provider = MockProvider(
-                account_id=account.account_identifier,
-                default_region=account.default_region,
-            )
+            # Instantiate Provider & Engine based on account provider and system mode
+            if account.provider.upper() == "AWS" or (settings.CSPM_MODE.lower() == "aws" and account.provider.upper() != "MOCK"):
+                if account.credential_mode == "ROLE" and not account.role_arn:
+                    raise ValueError(
+                        f"Cloud account '{account.name}' is configured for ROLE credential mode, "
+                        "but no IAM Role ARN is configured. Please configure Role ARN before scanning."
+                    )
+                logger.info(f"Initializing AWSProvider for account '{account.account_identifier}' in region '{account.default_region}' (Strict AWS Mode)")
+                provider = AWSProvider(
+                    account_id=account.account_identifier,
+                    default_region=account.default_region or settings.AWS_DEFAULT_REGION,
+                    role_arn=account.role_arn,
+                    external_id=account.external_id,
+                )
+            else:
+                logger.info(f"Initializing MockProvider for simulated account '{account.account_identifier}'")
+                provider = MockProvider(
+                    account_id=account.account_identifier,
+                    default_region=account.default_region,
+                )
             engine = ScannerEngine(provider=provider)
 
             # Run Discovery Pipeline
             discovered_items = engine.run_discovery_pipeline()
 
-            # Upsert Resource records
+            # Upsert Resource records (JSON-safe normalized)
             now = utc_now()
             scanned_resource_ids = set()
-            for item in discovered_items:
-                scanned_resource_ids.add(item.resource_id)
-                existing_res = db.query(Resource).filter(
-                    Resource.cloud_account_id == account.id,
-                    Resource.resource_id == item.resource_id,
-                ).first()
+            try:
+                for item in discovered_items:
+                    scanned_resource_ids.add(item.resource_id)
+                    existing_res = db.query(Resource).filter(
+                        Resource.cloud_account_id == account.id,
+                        Resource.resource_id == item.resource_id,
+                    ).first()
 
-                if existing_res:
-                    existing_res.scan_id = scan.id
-                    existing_res.resource_name = item.resource_name
-                    existing_res.region = item.region
-                    existing_res.tags = item.tags
-                    existing_res.configuration = item.configuration
-                    existing_res.last_seen = now
-                else:
-                    new_res = Resource(
-                        cloud_account_id=account.id,
-                        scan_id=scan.id,
-                        provider=item.provider,
-                        service=item.service,
-                        resource_type=item.resource_type,
-                        resource_id=item.resource_id,
-                        resource_name=item.resource_name,
-                        region=item.region,
-                        tags=item.tags,
-                        configuration=item.configuration,
-                        security_status="UNKNOWN",
-                        first_seen=now,
-                        last_seen=now,
-                    )
-                    db.add(new_res)
+                    safe_tags = to_json_safe(item.tags or {})
+                    safe_config = to_json_safe(item.configuration or {})
 
-            db.commit()
+                    if existing_res:
+                        existing_res.scan_id = scan.id
+                        existing_res.resource_name = item.resource_name
+                        existing_res.region = item.region
+                        existing_res.tags = safe_tags
+                        existing_res.configuration = safe_config
+                        existing_res.last_seen = now
+                    else:
+                        new_res = Resource(
+                            cloud_account_id=account.id,
+                            scan_id=scan.id,
+                            provider=item.provider,
+                            service=item.service,
+                            resource_type=item.resource_type,
+                            resource_id=item.resource_id,
+                            resource_name=item.resource_name,
+                            region=item.region,
+                            tags=safe_tags,
+                            configuration=safe_config,
+                            security_status="UNKNOWN",
+                            first_seen=now,
+                            last_seen=now,
+                        )
+                        db.add(new_res)
+
+                db.commit()
+            except Exception as res_err:
+                db.rollback()
+                logger.error(f"Failed to persist discovered resources for scan {scan.id}: {res_err}", exc_info=True)
+                raise
 
             # Ensure rules are synchronized in DB
             FindingService.sync_security_rules_to_db(db)
@@ -160,6 +210,10 @@ class ScanService:
 
             # Recalculate resource security status (CRITICAL, AT_RISK, SECURE)
             FindingService.update_resource_security_statuses(db, account.id)
+
+            # Map active findings to compliance framework controls
+            from app.services.compliance_service import ComplianceService
+            ComplianceService.map_findings_to_compliance(db, active_findings)
 
             # Tally metrics
             total_scanned = len(discovered_items)
@@ -197,6 +251,16 @@ class ScanService:
                 "low_priority_count": posture_data["low_priority_count"],
             }
 
+            # Generate in-app notifications for scan completion and high/critical findings
+            from app.services.notification_service import NotificationService
+            NotificationService.create_scan_notifications(
+                db=db,
+                scan=scan,
+                user_id=user.id,
+                active_findings=active_findings,
+                security_score=security_score,
+            )
+
             # Audit log
             audit = AuditLog(
                 user_id=user.id,
@@ -222,25 +286,43 @@ class ScanService:
         except Exception as e:
             logger.error(f"Scan {scan.id} failed with error: {str(e)}", exc_info=True)
             db.rollback()
-            scan.status = "FAILED"
-            scan.completed_at = utc_now()
-            scan.error_message = f"Scanner error: {str(e)}"
-            
-            audit = AuditLog(
-                user_id=user.id,
-                action="SCAN_TRIGGERED",
-                resource_type="scan",
-                resource_id=str(scan.id),
-                result="FAILURE",
-                metadata_json={
-                    "cloud_account_id": str(account.id),
-                    "error": str(e),
-                },
-                ip_address=client_ip,
-            )
-            db.add(audit)
-            db.commit()
-            db.refresh(scan)
+            try:
+                target_scan = db.query(Scan).filter(Scan.id == scan.id).first()
+                if target_scan:
+                    target_scan.status = "FAILED"
+                    target_scan.completed_at = utc_now()
+                    target_scan.error_message = f"Scanner error: {str(e)}"
+                    db.commit()
+                    db.refresh(target_scan)
+                    scan = target_scan
+                else:
+                    scan.status = "FAILED"
+                    scan.completed_at = utc_now()
+                    scan.error_message = f"Scanner error: {str(e)}"
+                    db.commit()
+            except Exception as update_err:
+                db.rollback()
+                logger.error(f"Failed to record FAILED status for scan {scan.id}: {update_err}")
+
+            try:
+                audit = AuditLog(
+                    user_id=user.id,
+                    action="SCAN_TRIGGERED",
+                    resource_type="scan",
+                    resource_id=str(scan.id),
+                    result="FAILURE",
+                    metadata_json={
+                        "cloud_account_id": str(account.id),
+                        "error": str(e),
+                    },
+                    ip_address=client_ip,
+                )
+                db.add(audit)
+                db.commit()
+            except Exception as audit_err:
+                db.rollback()
+                logger.error(f"Failed to record failure audit log for scan {scan.id}: {audit_err}")
+
             return scan
 
     @staticmethod
@@ -249,9 +331,16 @@ class ScanService:
         account_id: Optional[uuid.UUID] = None,
         limit: int = 50,
         offset: int = 0,
+        user: Optional[User] = None,
     ) -> Tuple[List[Scan], int]:
-        """Returns paginated scan history and total count."""
+        """Returns paginated scan history and total count, scoped by user ownership."""
+        from app.api.deps import is_admin, get_user_accessible_account_ids
         query = db.query(Scan)
+        
+        if user and not is_admin(user):
+            accessible_ids = get_user_accessible_account_ids(db, user)
+            query = query.filter(Scan.cloud_account_id.in_(accessible_ids))
+
         if account_id:
             query = query.filter(Scan.cloud_account_id == account_id)
         
@@ -260,25 +349,61 @@ class ScanService:
         return items, total
 
     @staticmethod
-    def get_scan_by_id(db: Session, scan_id: uuid.UUID) -> Optional[Scan]:
-        """Retrieves a single scan record with execution metrics."""
-        return db.query(Scan).filter(Scan.id == scan_id).first()
+    def get_scan_by_id(db: Session, scan_id: uuid.UUID, user: Optional[User] = None) -> Optional[Scan]:
+        """Retrieves a single scan record with execution metrics and user isolation."""
+        from app.api.deps import is_admin
+        scan = db.query(Scan).filter(Scan.id == scan_id).first()
+        if not scan:
+            return None
+        if user and not is_admin(user):
+            if scan.cloud_account and scan.cloud_account.user_id is not None and scan.cloud_account.user_id != user.id:
+                return None
+        return scan
 
     @staticmethod
     def get_resources(
         db: Session,
         account_id: Optional[uuid.UUID] = None,
+        scan_id: Optional[uuid.UUID] = None,
+        provider: Optional[str] = None,
         service: Optional[str] = None,
         security_status: Optional[str] = None,
         search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        user: Optional[User] = None,
     ) -> Tuple[List[Resource], int]:
-        """Returns paginated cloud resource inventory with multi-criteria filtering."""
+        """Returns paginated cloud resource inventory with multi-criteria filtering and user isolation."""
+        from app.api.deps import is_admin, get_user_accessible_account_ids
         query = db.query(Resource)
+
+        if user and not is_admin(user):
+            accessible_ids = get_user_accessible_account_ids(db, user)
+            query = query.filter(Resource.cloud_account_id.in_(accessible_ids))
+
+        # If account_id is not provided and no scan_id or provider filter, resolve based on current CSPM mode
+        if not account_id and not scan_id and not provider:
+            if user and not is_admin(user):
+                user_acc = db.query(CloudAccount).filter(CloudAccount.user_id == user.id, CloudAccount.is_active == True).first()
+                if user_acc:
+                    account_id = user_acc.id
+
+            if not account_id:
+                if settings.CSPM_MODE.lower() == "aws":
+                    aws_acc = db.query(CloudAccount).filter(CloudAccount.provider == "AWS", CloudAccount.is_active == True).first()
+                    if aws_acc:
+                        account_id = aws_acc.id
+                elif settings.CSPM_MODE.lower() == "mock":
+                    demo_acc = db.query(CloudAccount).filter(CloudAccount.provider == "MOCK").first()
+                    if demo_acc:
+                        account_id = demo_acc.id
 
         if account_id:
             query = query.filter(Resource.cloud_account_id == account_id)
+        if scan_id:
+            query = query.filter(Resource.scan_id == scan_id)
+        if provider:
+            query = query.filter(Resource.provider == provider.upper())
         if service:
             query = query.filter(Resource.service == service.upper())
         if security_status:
@@ -298,35 +423,67 @@ class ScanService:
         return items, total
 
     @staticmethod
-    def get_resource_by_id(db: Session, resource_id: uuid.UUID) -> Optional[Resource]:
-        """Retrieves full configuration details and tags for a discovered asset."""
-        return db.query(Resource).filter(Resource.id == resource_id).first()
+    def get_resource_by_id(db: Session, resource_id: uuid.UUID, user: Optional[User] = None) -> Optional[Resource]:
+        """Retrieves full configuration details and tags for a discovered asset with user isolation."""
+        from app.api.deps import is_admin
+        res = db.query(Resource).filter(Resource.id == resource_id).first()
+        if not res:
+            return None
+        if user and not is_admin(user):
+            if res.cloud_account and res.cloud_account.user_id is not None and res.cloud_account.user_id != user.id:
+                return None
+        return res
 
     @staticmethod
-    def compare_scan_by_id(db: Session, scan_id: uuid.UUID) -> Dict[str, Any]:
-        """Compares a specific scan against its immediate predecessor for the same cloud account."""
+    def compare_scan_by_id(db: Session, scan_id: uuid.UUID, user: Optional[User] = None) -> Dict[str, Any]:
+        """Compares a specific scan against its immediate predecessor for the same cloud account with user isolation."""
+        from app.api.deps import is_admin
         scan = db.query(Scan).filter(Scan.id == scan_id).first()
         if not scan:
             raise ValueError(f"Scan with ID '{scan_id}' not found.")
+        if user and not is_admin(user):
+            if scan.cloud_account and scan.cloud_account.user_id is not None and scan.cloud_account.user_id != user.id:
+                raise ValueError(f"Scan with ID '{scan_id}' not found.")
 
         return RiskScoringService.compare_scans(db=db, current_scan=scan)
 
     @staticmethod
-    def get_dashboard_stats(db: Session, account_id: Optional[uuid.UUID] = None) -> Dict[str, Any]:
+    def get_dashboard_stats(db: Session, account_id: Optional[uuid.UUID] = None, user: Optional[User] = None) -> Dict[str, Any]:
         """
-        Gathers complete, authentic security posture metrics for the SOC dashboard.
+        Gathers complete, authentic security posture metrics for the SOC dashboard with user isolation.
         Returns live posture score, rating, risk distribution, priority distribution,
         score trend, top riskiest resources, and highest-risk findings.
         """
         from app.models.finding import Finding, SecurityRule
+        from app.api.deps import is_admin, get_user_accessible_account_ids
 
-        # Resolve account
+        accessible_ids = None
+        if user and not is_admin(user):
+            accessible_ids = get_user_accessible_account_ids(db, user)
+
+        # Resolve account based on mode if not explicitly provided
         if not account_id:
-            demo_acc = db.query(CloudAccount).filter(CloudAccount.provider == "MOCK").first()
-            account_id = demo_acc.id if demo_acc else None
+            if user and not is_admin(user):
+                user_acc = db.query(CloudAccount).filter(CloudAccount.user_id == user.id, CloudAccount.is_active == True).first()
+                if user_acc:
+                    account_id = user_acc.id
+                else:
+                    demo_acc = db.query(CloudAccount).filter(CloudAccount.user_id.is_(None), CloudAccount.is_active == True).first()
+                    if demo_acc:
+                        account_id = demo_acc.id
+            else:
+                if settings.CSPM_MODE.lower() == "aws":
+                    aws_acc = db.query(CloudAccount).filter(CloudAccount.provider == "AWS", CloudAccount.is_active == True).first()
+                    if aws_acc:
+                        account_id = aws_acc.id
+                if not account_id:
+                    demo_acc = db.query(CloudAccount).filter(CloudAccount.provider == "MOCK").first()
+                    account_id = demo_acc.id if demo_acc else None
 
         # Fetch latest completed scan
         scan_query = db.query(Scan).filter(Scan.status == "COMPLETED")
+        if accessible_ids is not None:
+            scan_query = scan_query.filter(Scan.cloud_account_id.in_(accessible_ids))
         if account_id:
             scan_query = scan_query.filter(Scan.cloud_account_id == account_id)
         latest_scan = scan_query.order_by(desc(Scan.created_at)).first()
@@ -349,6 +506,8 @@ class ScanService:
 
         # Top 5 highest risk open findings
         findings_query = db.query(Finding).join(SecurityRule).join(Resource).filter(Finding.status == "OPEN")
+        if accessible_ids is not None:
+            findings_query = findings_query.filter(Finding.cloud_account_id.in_(accessible_ids))
         if account_id:
             findings_query = findings_query.filter(Finding.cloud_account_id == account_id)
         top_findings_raw = (
@@ -373,6 +532,8 @@ class ScanService:
 
         # Top 5 riskiest resources (at risk or critical)
         res_query = db.query(Resource)
+        if accessible_ids is not None:
+            res_query = res_query.filter(Resource.cloud_account_id.in_(accessible_ids))
         if account_id:
             res_query = res_query.filter(Resource.cloud_account_id == account_id)
         all_resources = res_query.all()

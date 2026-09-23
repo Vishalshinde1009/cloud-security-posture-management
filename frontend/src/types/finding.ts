@@ -45,7 +45,7 @@ export interface Finding {
   };
   risk_explanation?: string;
   risk_calculated_at?: string;
-  status: 'OPEN' | 'RESOLVED' | 'SUPPRESSED';
+  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'ACCEPTED_RISK' | 'FALSE_POSITIVE' | 'SUPPRESSED';
   remediation: string | null;
   first_detected: string;
   last_detected: string;

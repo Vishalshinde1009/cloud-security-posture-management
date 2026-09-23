@@ -30,6 +30,7 @@ class User(Base, UUIDMixin, TimestampMixin):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_alerts_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_login: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
@@ -52,6 +53,10 @@ class User(Base, UUIDMixin, TimestampMixin):
     reports_generated: Mapped[List["Report"]] = relationship(
         "Report",
         back_populates="generated_by_user",
+    )
+    cloud_accounts: Mapped[List["CloudAccount"]] = relationship(
+        "CloudAccount",
+        back_populates="user",
     )
 
     def __repr__(self) -> str:

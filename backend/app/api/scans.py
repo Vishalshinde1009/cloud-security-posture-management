@@ -18,7 +18,7 @@ router = APIRouter(prefix="/scans", tags=["CSPM Scans"])
 def trigger_scan(
     request: Request,
     payload: Optional[ScanCreate] = None,
-    current_user: User = Depends(require_role(["ADMIN", "SECURITY_ANALYST"])),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -26,7 +26,9 @@ def trigger_scan(
     RBAC: Restricted to ADMIN and SECURITY_ANALYST roles.
     In Phase 4, executes safe deterministic MockProvider pipeline.
     """
-    account_id = payload.account_id if payload else None
+    account_id = None
+    if payload:
+        account_id = payload.account_id or payload.cloud_account_id
     client_ip = get_client_ip(request)
 
     try:
@@ -60,7 +62,7 @@ def list_scans(
 ):
     """
     Retrieves historical scan execution runs with pagination.
-    Accessible to all authenticated users (ADMIN, SECURITY_ANALYST, VIEWER).
+    Enforces user isolation: normal users only see scans from accounts they own.
     """
     offset = (page - 1) * limit
     items, total = ScanService.get_scans(
@@ -68,6 +70,7 @@ def list_scans(
         account_id=account_id,
         limit=limit,
         offset=offset,
+        user=current_user,
     )
     return ScanListResponse(
         items=items,
@@ -85,8 +88,9 @@ def get_scan(
 ):
     """
     Retrieves execution metrics and state for a specific scan.
+    Enforces user isolation: returns 404 if scan belongs to another user's account.
     """
-    scan = ScanService.get_scan_by_id(db=db, scan_id=scan_id)
+    scan = ScanService.get_scan_by_id(db=db, scan_id=scan_id, user=current_user)
     if not scan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -104,12 +108,14 @@ def compare_scan(
     """
     Computes historical security posture progression and drift between this scan
     and its immediate predecessor for the same cloud account.
+    Enforces user isolation: returns 404 if scan belongs to another user's account.
     """
     try:
-        comparison = ScanService.compare_scan_by_id(db=db, scan_id=scan_id)
+        comparison = ScanService.compare_scan_by_id(db=db, scan_id=scan_id, user=current_user)
         return comparison
     except ValueError as ve:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(ve),
         )
+

@@ -1,6 +1,8 @@
 export interface Scan {
   id: string;
   cloud_account_id: string;
+  account_name?: string | null;
+  account_provider?: string | null;
   status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
   started_at: string | null;
   completed_at: string | null;

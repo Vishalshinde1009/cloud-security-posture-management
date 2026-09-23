@@ -6,11 +6,14 @@ from pydantic import BaseModel, Field
 
 class ScanCreate(BaseModel):
     account_id: Optional[uuid.UUID] = None
+    cloud_account_id: Optional[uuid.UUID] = None
 
 
 class ScanResponse(BaseModel):
     id: uuid.UUID
     cloud_account_id: uuid.UUID
+    account_name: Optional[str] = None
+    account_provider: Optional[str] = None
     status: str
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

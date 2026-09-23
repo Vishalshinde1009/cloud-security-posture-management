@@ -4,9 +4,11 @@ from typing import List, Tuple, Optional, Dict, Any, Set
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func, or_
 
+from app.models.auth import User
 from app.models.finding import SecurityRule, Finding
 from app.models.cloud import CloudAccount, Scan, Resource
 from app.models.base import utc_now
+from app.core.json_utils import to_json_safe
 from app.scanner.rules.registry import default_registry
 from app.scanner.rules.executor import FindingCandidate
 from app.scanner.risk.service import RiskScoringService
@@ -94,109 +96,117 @@ class FindingService:
         medium_count = 0
         low_count = 0
 
-        for candidate in candidates:
-            rule_id = candidate.rule.rule_id
-            res_id = candidate.resource.resource_id
-            fingerprint = candidate.finding_identifier
+        try:
+            for candidate in candidates:
+                rule_id = candidate.rule.rule_id
+                res_id = candidate.resource.resource_id
+                fingerprint = candidate.finding_identifier
 
-            active_fingerprints.add(fingerprint)
+                active_fingerprints.add(fingerprint)
 
-            db_rule = rules_map.get(rule_id)
-            db_resource = resources_map.get(res_id)
+                db_rule = rules_map.get(rule_id)
+                db_resource = resources_map.get(res_id)
 
-            if not db_rule or not db_resource:
-                logger.warning(f"Skipping candidate for missing rule ({rule_id}) or resource ({res_id})")
-                continue
+                if not db_rule or not db_resource:
+                    logger.warning(f"Skipping candidate for missing rule ({rule_id}) or resource ({res_id})")
+                    continue
 
-            severity = candidate.result.severity or candidate.rule.severity
+                severity = candidate.result.severity or candidate.rule.severity
 
-            # Deterministic, explainable risk scoring via RiskScoringService
-            risk_calc = RiskScoringService.calculate_finding_risk(
-                severity=severity,
-                resource_type=db_resource.resource_type,
-                resource_name=db_resource.resource_name,
-                tags=db_resource.tags or {},
-                configuration=db_resource.configuration or {},
-                evidence=candidate.result.evidence or {},
-                rule_id=db_rule.rule_id,
-                title=candidate.rule.title,
-            )
-
-            # Check if an existing finding exists for this account & fingerprint
-            existing = db.query(Finding).filter(
-                Finding.cloud_account_id == account.id,
-                Finding.finding_identifier == fingerprint,
-            ).first()
-
-            if existing:
-                existing.scan_id = scan.id
-                existing.status = "OPEN"
-                existing.last_detected = now
-                existing.resolved_at = None
-                existing.evidence = candidate.result.evidence
-                existing.severity = severity
-                existing.risk_score = risk_calc["risk_score"]
-                existing.risk_level = risk_calc["risk_level"]
-                existing.risk_priority = risk_calc["risk_priority"]
-                existing.risk_factors = risk_calc["risk_factors"]
-                existing.risk_explanation = risk_calc["risk_explanation"]
-                existing.risk_calculated_at = now
-                existing.remediation = candidate.result.remediation or candidate.rule.remediation
-                active_findings.append(existing)
-            else:
-                new_finding = Finding(
-                    id=uuid.uuid4(),
-                    rule_id=db_rule.id,
-                    scan_id=scan.id,
-                    cloud_account_id=account.id,
-                    resource_id=db_resource.id,
-                    finding_identifier=fingerprint,
-                    title=candidate.rule.title,
-                    description=candidate.result.reason or candidate.rule.description,
+                # Deterministic, explainable risk scoring via RiskScoringService
+                risk_calc = RiskScoringService.calculate_finding_risk(
                     severity=severity,
-                    risk_score=risk_calc["risk_score"],
-                    risk_level=risk_calc["risk_level"],
-                    risk_priority=risk_calc["risk_priority"],
-                    risk_factors=risk_calc["risk_factors"],
-                    risk_explanation=risk_calc["risk_explanation"],
-                    risk_calculated_at=now,
-                    status="OPEN",
-                    remediation=candidate.result.remediation or candidate.rule.remediation,
-                    evidence=candidate.result.evidence,
-                    first_detected=now,
-                    last_detected=now,
+                    resource_type=db_resource.resource_type,
+                    resource_name=db_resource.resource_name,
+                    tags=db_resource.tags or {},
+                    configuration=db_resource.configuration or {},
+                    evidence=candidate.result.evidence or {},
+                    rule_id=db_rule.rule_id,
+                    title=candidate.rule.title,
                 )
-                db.add(new_finding)
-                active_findings.append(new_finding)
 
-            # Count severities
-            sev_upper = severity.upper()
-            if sev_upper == "CRITICAL":
-                critical_count += 1
-            elif sev_upper == "HIGH":
-                high_count += 1
-            elif sev_upper == "MEDIUM":
-                medium_count += 1
-            elif sev_upper == "LOW":
-                low_count += 1
+                safe_evidence = to_json_safe(candidate.result.evidence or {})
+                safe_risk_factors = to_json_safe(risk_calc.get("risk_factors") or {})
 
-        # Drift Resolution: Previously open findings on resources that were scanned,
-        # but are no longer triggered, transition to RESOLVED
-        all_open_findings = db.query(Finding).filter(
-            Finding.cloud_account_id == account.id,
-            Finding.status == "OPEN",
-        ).all()
+                # Check if an existing finding exists for this account & fingerprint
+                existing = db.query(Finding).filter(
+                    Finding.cloud_account_id == account.id,
+                    Finding.finding_identifier == fingerprint,
+                ).first()
 
-        for old_f in all_open_findings:
-            if old_f.finding_identifier not in active_fingerprints:
-                # Check if the associated resource was part of this scan
-                if old_f.resource and old_f.resource.resource_id in scanned_resource_ids:
-                    old_f.status = "RESOLVED"
-                    old_f.resolved_at = now
-                    logger.info(f"Finding {old_f.id} ({old_f.title}) resolved due to clean scan.")
+                if existing:
+                    existing.scan_id = scan.id
+                    existing.status = "OPEN"
+                    existing.last_detected = now
+                    existing.resolved_at = None
+                    existing.evidence = safe_evidence
+                    existing.severity = severity
+                    existing.risk_score = risk_calc["risk_score"]
+                    existing.risk_level = risk_calc["risk_level"]
+                    existing.risk_priority = risk_calc["risk_priority"]
+                    existing.risk_factors = safe_risk_factors
+                    existing.risk_explanation = risk_calc["risk_explanation"]
+                    existing.risk_calculated_at = now
+                    existing.remediation = candidate.result.remediation or candidate.rule.remediation
+                    active_findings.append(existing)
+                else:
+                    new_finding = Finding(
+                        id=uuid.uuid4(),
+                        rule_id=db_rule.id,
+                        scan_id=scan.id,
+                        cloud_account_id=account.id,
+                        resource_id=db_resource.id,
+                        finding_identifier=fingerprint,
+                        title=candidate.rule.title,
+                        description=candidate.result.reason or candidate.rule.description,
+                        severity=severity,
+                        risk_score=risk_calc["risk_score"],
+                        risk_level=risk_calc["risk_level"],
+                        risk_priority=risk_calc["risk_priority"],
+                        risk_factors=safe_risk_factors,
+                        risk_explanation=risk_calc["risk_explanation"],
+                        risk_calculated_at=now,
+                        status="OPEN",
+                        remediation=candidate.result.remediation or candidate.rule.remediation,
+                        evidence=safe_evidence,
+                        first_detected=now,
+                        last_detected=now,
+                    )
+                    db.add(new_finding)
+                    active_findings.append(new_finding)
 
-        db.commit()
-        return active_findings, critical_count, high_count, medium_count, low_count
+                # Count severities
+                sev_upper = severity.upper()
+                if sev_upper == "CRITICAL":
+                    critical_count += 1
+                elif sev_upper == "HIGH":
+                    high_count += 1
+                elif sev_upper == "MEDIUM":
+                    medium_count += 1
+                elif sev_upper == "LOW":
+                    low_count += 1
+
+            # Drift Resolution: Previously open findings on resources that were scanned,
+            # but are no longer triggered, transition to RESOLVED
+            all_open_findings = db.query(Finding).filter(
+                Finding.cloud_account_id == account.id,
+                Finding.status == "OPEN",
+            ).all()
+
+            for old_f in all_open_findings:
+                if old_f.finding_identifier not in active_fingerprints:
+                    # Check if the associated resource was part of this scan
+                    if old_f.resource and old_f.resource.resource_id in scanned_resource_ids:
+                        old_f.status = "RESOLVED"
+                        old_f.resolved_at = now
+                        logger.info(f"Finding {old_f.id} ({old_f.title}) resolved due to clean scan.")
+
+            db.commit()
+            return active_findings, critical_count, high_count, medium_count, low_count
+        except Exception as err:
+            db.rollback()
+            logger.error(f"Failed to persist finding candidates for scan {scan.id}: {err}", exc_info=True)
+            raise
 
     @staticmethod
     def update_resource_security_statuses(db: Session, account_id: uuid.UUID) -> None:
@@ -206,24 +216,29 @@ class FindingService:
         - AT_RISK: Any open HIGH or MEDIUM severity finding exists on resource.
         - SECURE: No open findings exist.
         """
-        resources = db.query(Resource).filter(Resource.cloud_account_id == account_id).all()
+        try:
+            resources = db.query(Resource).filter(Resource.cloud_account_id == account_id).all()
 
-        for res in resources:
-            open_findings = db.query(Finding).filter(
-                Finding.resource_id == res.id,
-                Finding.status == "OPEN",
-            ).all()
+            for res in resources:
+                open_findings = db.query(Finding).filter(
+                    Finding.resource_id == res.id,
+                    Finding.status == "OPEN",
+                ).all()
 
-            if not open_findings:
-                res.security_status = "SECURE"
-            else:
-                has_critical = any(f.severity.upper() == "CRITICAL" for f in open_findings)
-                if has_critical:
-                    res.security_status = "CRITICAL"
+                if not open_findings:
+                    res.security_status = "SECURE"
                 else:
-                    res.security_status = "AT_RISK"
+                    has_critical = any(f.severity.upper() == "CRITICAL" for f in open_findings)
+                    if has_critical:
+                        res.security_status = "CRITICAL"
+                    else:
+                        res.security_status = "AT_RISK"
 
-        db.commit()
+            db.commit()
+        except Exception as err:
+            db.rollback()
+            logger.error(f"Failed to update resource security statuses for account {account_id}: {err}", exc_info=True)
+            raise
 
     @staticmethod
     def get_findings(
@@ -241,11 +256,35 @@ class FindingService:
         search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        user: Optional[User] = None,
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
         Retrieves paginated findings with multi-criteria filtering and enriched resource/rule metadata.
+        Enforces user isolation so normal users only see findings belonging to their cloud accounts.
         """
+        from app.api.deps import is_admin, get_user_accessible_account_ids
         query = db.query(Finding).join(SecurityRule).join(Resource)
+
+        if user and not is_admin(user):
+            accessible_ids = get_user_accessible_account_ids(db, user)
+            query = query.filter(Finding.cloud_account_id.in_(accessible_ids))
+
+        if not account_id:
+            from app.core.config import settings
+            if user and not is_admin(user):
+                user_acc = db.query(CloudAccount).filter(CloudAccount.user_id == user.id, CloudAccount.is_active == True).first()
+                if user_acc:
+                    account_id = user_acc.id
+
+            if not account_id:
+                if settings.CSPM_MODE.lower() == "aws":
+                    aws_acc = db.query(CloudAccount).filter(CloudAccount.provider == "AWS", CloudAccount.is_active == True).first()
+                    if aws_acc:
+                        account_id = aws_acc.id
+                elif settings.CSPM_MODE.lower() == "mock":
+                    demo_acc = db.query(CloudAccount).filter(CloudAccount.provider == "MOCK").first()
+                    if demo_acc:
+                        account_id = demo_acc.id
 
         if account_id:
             query = query.filter(Finding.cloud_account_id == account_id)
@@ -315,11 +354,15 @@ class FindingService:
         return enriched, total
 
     @staticmethod
-    def get_finding_by_id(db: Session, finding_id: uuid.UUID) -> Optional[Dict[str, Any]]:
-        """Retrieves a single finding with full technical configuration evidence."""
+    def get_finding_by_id(db: Session, finding_id: uuid.UUID, user: Optional[User] = None) -> Optional[Dict[str, Any]]:
+        """Retrieves a single finding with full technical configuration evidence and user isolation."""
+        from app.api.deps import is_admin
         f = db.query(Finding).filter(Finding.id == finding_id).first()
         if not f:
             return None
+        if user and not is_admin(user):
+            if f.cloud_account and f.cloud_account.user_id is not None and f.cloud_account.user_id != user.id:
+                return None
 
         return {
             "id": f.id,
@@ -385,3 +428,162 @@ class FindingService:
             return db.query(SecurityRule).filter(SecurityRule.id == val_uuid).first()
         except ValueError:
             return db.query(SecurityRule).filter(SecurityRule.rule_id == identifier.upper()).first()
+
+    @staticmethod
+    def update_finding_status(
+        db: Session,
+        finding_id: uuid.UUID,
+        new_status: str,
+        user: Any,
+        rationale: Optional[str] = None,
+        client_ip: Optional[str] = None,
+    ) -> Finding:
+        """
+        Updates the lifecycle status of a finding.
+        Valid statuses: OPEN, IN_PROGRESS, RESOLVED, ACCEPTED_RISK, FALSE_POSITIVE.
+        Logs an audit trail record for compliance and accountability.
+        """
+        from app.models.audit import AuditLog
+        from app.api.deps import is_admin
+        valid_statuses = {"OPEN", "IN_PROGRESS", "RESOLVED", "ACCEPTED_RISK", "FALSE_POSITIVE"}
+        target_status = new_status.upper()
+        if target_status not in valid_statuses:
+            raise ValueError(f"Invalid status '{new_status}'. Allowed values: {', '.join(sorted(valid_statuses))}")
+
+        finding = db.query(Finding).filter(Finding.id == finding_id).first()
+        if not finding:
+            raise ValueError(f"Finding with ID '{finding_id}' not found.")
+        if not is_admin(user):
+            if not finding.cloud_account or (finding.cloud_account.user_id is not None and finding.cloud_account.user_id != user.id):
+                raise ValueError(f"Finding with ID '{finding_id}' not found.")
+
+        old_status = finding.status
+        finding.status = target_status
+        if target_status in {"RESOLVED", "FALSE_POSITIVE"}:
+            finding.resolved_at = utc_now()
+        elif target_status == "OPEN":
+            finding.resolved_at = None
+
+        audit = AuditLog(
+            user_id=user.id,
+            action="FINDING_STATUS_CHANGED",
+            resource_type="finding",
+            resource_id=str(finding.id),
+            result="SUCCESS",
+            metadata_json={
+                "old_status": old_status,
+                "new_status": target_status,
+                "rationale": rationale,
+                "finding_identifier": finding.finding_identifier,
+            },
+            ip_address=client_ip,
+        )
+        db.add(audit)
+        db.commit()
+        db.refresh(finding)
+        return finding
+
+    @staticmethod
+    def add_finding_note(
+        db: Session,
+        finding_id: uuid.UUID,
+        note_text: str,
+        user: Any,
+        client_ip: Optional[str] = None,
+    ) -> Any:
+        """Adds a sanitized analyst investigation note to a finding with audit logging and user isolation."""
+        import html
+        from app.models.finding import FindingNote
+        from app.models.audit import AuditLog
+        from app.api.deps import is_admin
+
+        finding = db.query(Finding).filter(Finding.id == finding_id).first()
+        if not finding:
+            raise ValueError(f"Finding with ID '{finding_id}' not found.")
+        if not is_admin(user):
+            if not finding.cloud_account or (finding.cloud_account.user_id is not None and finding.cloud_account.user_id != user.id):
+                raise ValueError(f"Finding with ID '{finding_id}' not found.")
+
+        sanitized_note = html.escape(note_text.strip())
+        note = FindingNote(
+            finding_id=finding.id,
+            author_id=user.id,
+            author_username=user.username,
+            note=sanitized_note,
+        )
+        db.add(note)
+
+        audit = AuditLog(
+            user_id=user.id,
+            action="FINDING_NOTE_ADDED",
+            resource_type="finding",
+            resource_id=str(finding.id),
+            result="SUCCESS",
+            metadata_json={
+                "finding_identifier": finding.finding_identifier,
+                "note_preview": sanitized_note[:50],
+            },
+            ip_address=client_ip,
+        )
+        db.add(audit)
+        db.commit()
+        db.refresh(note)
+        return note
+
+    @staticmethod
+    def get_finding_notes(db: Session, finding_id: uuid.UUID, user: Optional[User] = None) -> List[Dict[str, Any]]:
+        """Retrieves all analyst notes for a specific finding with user isolation."""
+        from app.models.finding import FindingNote
+        from app.api.deps import is_admin
+        if user and not is_admin(user):
+            finding = db.query(Finding).filter(Finding.id == finding_id).first()
+            if not finding or not finding.cloud_account or (finding.cloud_account.user_id is not None and finding.cloud_account.user_id != user.id):
+                return []
+
+        notes = db.query(FindingNote).filter(FindingNote.finding_id == finding_id).order_by(desc(FindingNote.created_at)).all()
+        return [
+            {
+                "id": n.id,
+                "finding_id": n.finding_id,
+                "user_id": n.author_id,
+                "author_name": n.author_username,
+                "note": n.note,
+                "created_at": n.created_at,
+            }
+            for n in notes
+        ]
+
+    @staticmethod
+    def toggle_rule(
+        db: Session,
+        rule_identifier: str,
+        enabled: bool,
+        user: Any,
+        client_ip: Optional[str] = None,
+    ) -> SecurityRule:
+        """Toggles a security rule enabled state with audit logging."""
+        from app.models.audit import AuditLog
+        rule = FindingService.get_rule_by_id(db, rule_identifier)
+        if not rule:
+            raise ValueError(f"Security rule '{rule_identifier}' not found.")
+
+        old_enabled = rule.enabled
+        rule.enabled = enabled
+
+        audit = AuditLog(
+            user_id=user.id,
+            action="RULE_TOGGLED",
+            resource_type="rule",
+            resource_id=rule.rule_id,
+            result="SUCCESS",
+            metadata_json={
+                "rule_id": rule.rule_id,
+                "old_enabled": old_enabled,
+                "new_enabled": enabled,
+            },
+            ip_address=client_ip,
+        )
+        db.add(audit)
+        db.commit()
+        db.refresh(rule)
+        return rule

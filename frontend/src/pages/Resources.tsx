@@ -1,9 +1,26 @@
 import { useState, useEffect, FormEvent } from 'react';
+import { useLocation } from 'react-router-dom';
 import api from '../services/api';
 import { CloudResource, ResourceListResponse } from '../types/scanner';
+import { resolvePreferredAccountId, getStoredAccountId, setStoredAccountId } from '../utils/accountSelection';
+
+interface CloudAccountOption {
+  id: string;
+  name: string;
+  provider: string;
+  is_active?: boolean;
+  role_arn?: string | null;
+  credential_mode?: string;
+  account_identifier?: string;
+}
 
 export const Resources = () => {
+  const location = useLocation();
   const [resources, setResources] = useState<CloudResource[]>([]);
+  const [accounts, setAccounts] = useState<CloudAccountOption[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(getStoredAccountId());
+  const [systemMode, setSystemMode] = useState<string>('mock');
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -18,17 +35,42 @@ export const Resources = () => {
 
   const services = ['S3', 'IAM', 'EC2', 'VPC', 'CloudTrail', 'RDS'];
 
+  useEffect(() => {
+    // Fetch backend system mode
+    api.get<{ mode: string }>('/health')
+      .then((res) => {
+        if (res.data?.mode) {
+          setSystemMode(res.data.mode.toLowerCase());
+        }
+      })
+      .catch(() => {});
+
+    // Fetch cloud accounts for targeting
+    api.get<any>('/cloud-accounts')
+      .then((res) => {
+        const items: CloudAccountOption[] = Array.isArray(res.data) ? res.data : (res.data?.items || []);
+        setAccounts(items);
+        const passedId = (location.state as any)?.accountId;
+        const preferredId = resolvePreferredAccountId(items, passedId || getStoredAccountId());
+        setSelectedAccountId(preferredId);
+        setStoredAccountId(preferredId);
+      })
+      .catch(() => {});
+  }, []);
+
   const fetchResources = async () => {
     try {
       setLoading(true);
       setError(null);
       let query = '/resources?limit=50';
+      if (selectedAccountId) query += `&account_id=${encodeURIComponent(selectedAccountId)}`;
       if (selectedService) query += `&service=${encodeURIComponent(selectedService)}`;
       if (selectedStatus) query += `&security_status=${encodeURIComponent(selectedStatus)}`;
       if (searchTerm) query += `&search=${encodeURIComponent(searchTerm)}`;
 
       const res = await api.get<ResourceListResponse>(query);
       setResources(res.data.items);
+      setTotalCount(res.data.total);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load cloud resources.');
     } finally {
@@ -38,7 +80,7 @@ export const Resources = () => {
 
   useEffect(() => {
     fetchResources();
-  }, [selectedService, selectedStatus]);
+  }, [selectedAccountId, selectedService, selectedStatus]);
 
   const handleSearchSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -57,6 +99,9 @@ export const Resources = () => {
     }
   };
 
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+  const isAws = selectedAccount?.provider === 'AWS' || (!selectedAccount && systemMode === 'aws');
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -64,25 +109,54 @@ export const Resources = () => {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight text-white">Discovered Cloud Resources</h1>
-            <span className="px-2.5 py-1 text-xs font-mono font-medium uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 rounded-md">
-              MOCK INVENTORY
-            </span>
+            {isAws ? (
+              <span className="px-2.5 py-1 text-xs font-mono font-semibold uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-md flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                AWS INVENTORY
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 text-xs font-mono font-semibold uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 rounded-md">
+                MOCK INVENTORY
+              </span>
+            )}
           </div>
           <p className="mt-1 text-sm text-slate-400">
             Unified normalized multi-service asset inventory discovered from cloud configurations.
           </p>
         </div>
 
-        <button
-          onClick={fetchResources}
-          disabled={loading}
-          className="px-3.5 py-2 text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 self-start md:self-auto"
-        >
-          <svg className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          Refresh Inventory
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          {accounts.length > 0 && (
+            <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
+              <span className="text-xs text-slate-400 font-medium">Target Account:</span>
+              <select
+                value={selectedAccountId}
+                onChange={(e) => {
+                  setSelectedAccountId(e.target.value);
+                  setStoredAccountId(e.target.value);
+                }}
+                className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-blue-500 font-sans"
+              >
+                {accounts.map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    {acc.name} ({acc.provider})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <button
+            onClick={fetchResources}
+            disabled={loading}
+            className="px-3.5 py-2 text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 self-start md:self-auto"
+          >
+            <svg className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh Inventory
+          </button>
+        </div>
       </div>
 
       {/* Filters Bar */}
@@ -156,7 +230,9 @@ export const Resources = () => {
       {/* Inventory Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-200">Discovered Assets ({resources.length})</h2>
+          <h2 className="text-sm font-semibold text-slate-200">
+            Discovered Assets ({totalCount !== null ? totalCount : resources.length})
+          </h2>
           <span className="text-xs text-slate-500">Click any row to inspect configuration JSON evidence</span>
         </div>
 
@@ -180,6 +256,7 @@ export const Resources = () => {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-800/50 text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-800">
                 <tr>
+                  <th className="px-4 py-3">Provider</th>
                   <th className="px-4 py-3">Service</th>
                   <th className="px-4 py-3">Resource Type</th>
                   <th className="px-4 py-3">Resource Identifier / Name</th>
@@ -195,6 +272,15 @@ export const Resources = () => {
                     onClick={() => handleInspect(res)}
                     className="hover:bg-slate-800/50 cursor-pointer transition-colors"
                   >
+                    <td className="px-4 py-3 font-mono">
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded border uppercase font-semibold ${
+                        res.provider === 'AWS'
+                          ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                          : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
+                      }`}>
+                        {res.provider}
+                      </span>
+                    </td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">
                         {res.service}

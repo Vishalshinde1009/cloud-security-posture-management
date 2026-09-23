@@ -16,6 +16,7 @@ router = APIRouter(prefix="/dashboard", tags=["Security Posture Dashboard"])
 @router.get("/stats")
 def get_dashboard_stats(
     account_id: Optional[uuid.UUID] = Query(None, description="Filter by cloud account UUID"),
+    cloud_account_id: Optional[uuid.UUID] = Query(None, description="Filter by cloud account UUID alias"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -27,4 +28,6 @@ def get_dashboard_stats(
     - Top 5 riskiest resources and highest risk findings
     - Historical scan comparison metrics (new, resolved, persistent findings)
     """
-    return ScanService.get_dashboard_stats(db=db, account_id=account_id)
+    target_account_id = account_id or cloud_account_id
+    return ScanService.get_dashboard_stats(db=db, account_id=target_account_id, user=current_user)
+

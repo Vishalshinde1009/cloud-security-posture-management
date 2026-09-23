@@ -71,3 +71,23 @@ class FindingListResponse(BaseModel):
     total: int
     page: int
     limit: int
+
+
+class FindingStatusUpdate(BaseModel):
+    status: str = Field(..., description="Target status: OPEN, IN_PROGRESS, RESOLVED, ACCEPTED_RISK, FALSE_POSITIVE")
+    rationale: Optional[str] = Field(None, max_length=1000, description="Justification or context for the status update")
+
+
+class FindingNoteCreate(BaseModel):
+    note: str = Field(..., min_length=1, max_length=5000, description="Analyst note or investigation details")
+
+
+class FindingNoteResponse(BaseModel):
+    id: uuid.UUID
+    finding_id: uuid.UUID
+    user_id: Optional[uuid.UUID] = None
+    author_name: Optional[str] = "System Analyst"
+    note: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
