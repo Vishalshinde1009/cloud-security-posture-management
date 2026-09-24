@@ -19,15 +19,26 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+def get_database_url() -> str:
+    """
+    Get the database URL, prioritizing the DATABASE_URL environment variable,
+    falling back to settings.DATABASE_URL, and normalizing postgres:// to postgresql://.
+    """
+    url = os.environ.get("DATABASE_URL") or settings.DATABASE_URL
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    return url
+
+
 # Set database URL dynamically from environment / app config
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", get_database_url())
 
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
-    url = config.get_main_option("sqlalchemy.url")
+    url = get_database_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -42,8 +53,9 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
+    db_url = get_database_url()
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = settings.DATABASE_URL
+    configuration["sqlalchemy.url"] = db_url
 
     connectable = engine_from_config(
         configuration,
@@ -55,7 +67,7 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            render_as_batch=True if settings.DATABASE_URL.startswith("sqlite") else False,
+            render_as_batch=True if db_url.startswith("sqlite") else False,
         )
 
         with context.begin_transaction():

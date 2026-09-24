@@ -23,7 +23,7 @@ def upgrade() -> None:
         'monitoring_configs',
         sa.Column('id', sa.Uuid(), nullable=False),
         sa.Column('cloud_account_id', sa.Uuid(), nullable=False),
-        sa.Column('enabled', sa.Boolean(), nullable=False, server_default=sa.text('0')),
+        sa.Column('enabled', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column('scan_interval_minutes', sa.Integer(), nullable=False, server_default='60'),
         sa.Column('last_scan_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('next_scan_at', sa.DateTime(timezone=True), nullable=True),
