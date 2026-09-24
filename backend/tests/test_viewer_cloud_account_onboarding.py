@@ -705,3 +705,217 @@ def test_audit_log_rbac_viewer_restricted_admin_allowed(client, db_session):
     assert res_a.status_code == 200
     assert "items" in res_a.json()
     assert "total" in res_a.json()
+
+
+# =============================================================================
+# 7. Explicit Cloud Account RBAC & Tenant Isolation Tests
+# =============================================================================
+
+def test_viewer_cloud_account_rbac_and_tenant_isolation(client, db_session):
+    """
+    Verifies:
+    - Unauthenticated GET /api/cloud-accounts -> 401
+    - Publicly registered user (VIEWER) can GET /api/cloud-accounts -> 200 (not 403)
+    - VIEWER sees only their own cloud accounts (not another tenant's)
+    - VIEWER accessing another user's cloud account detail -> 404
+    - ADMIN retains global access
+    - SECURITY_ANALYST retains access
+    """
+    # 1. Unauthenticated request -> 401
+    unauth_res = client.get("/api/cloud-accounts")
+    assert unauth_res.status_code == 401
+
+    # 2. Public registration -> user gets VIEWER role with read:accounts
+    reg_res = client.post(
+        "/api/auth/register",
+        json={
+            "username": "fresh_registered_viewer",
+            "email": "fresh_viewer@test.com",
+            "password": "SecurePassword123!",
+            "password_confirm": "SecurePassword123!",
+        },
+    )
+    assert reg_res.status_code == 201
+
+    # Login as fresh viewer
+    login_res = client.post(
+        "/api/auth/login",
+        json={
+            "username_or_email": "fresh_registered_viewer",
+            "password": "SecurePassword123!",
+        },
+    )
+    assert login_res.status_code == 200
+    fresh_token = login_res.json()["access_token"]
+    fresh_headers = {"Authorization": f"Bearer {fresh_token}"}
+
+    # Fresh viewer can immediately list cloud accounts -> 200 OK (not 403)
+    fresh_list_res = client.get("/api/cloud-accounts", headers=fresh_headers)
+    assert fresh_list_res.status_code == 200
+    assert isinstance(fresh_list_res.json(), list)
+
+    # 3. Create cloud account for fresh viewer
+    create_res1 = client.post(
+        "/api/cloud-accounts",
+        json={
+            "name": "Fresh Viewer Account",
+            "provider": "AWS",
+            "account_identifier": "111122223333",
+            "default_region": "us-east-1",
+            "credential_mode": "ENVIRONMENT",
+        },
+        headers=fresh_headers,
+    )
+    assert create_res1.status_code == 201
+    acc1_id = create_res1.json()["id"]
+
+    # Create another viewer user and their account
+    viewer2 = create_test_user(db_session, "tenant2_viewer", "t2_viewer@test.com", "VIEWER")
+    headers_viewer2 = auth_header_for_user(viewer2)
+
+    create_res2 = client.post(
+        "/api/cloud-accounts",
+        json={
+            "name": "Tenant 2 Account",
+            "provider": "AWS",
+            "account_identifier": "444455556666",
+            "default_region": "us-west-2",
+            "credential_mode": "ENVIRONMENT",
+        },
+        headers=headers_viewer2,
+    )
+    assert create_res2.status_code == 201
+    acc2_id = create_res2.json()["id"]
+
+    # 4. Fresh viewer lists accounts -> sees acc1, but NOT acc2
+    v1_accounts = client.get("/api/cloud-accounts", headers=fresh_headers).json()
+    v1_account_ids = [a["id"] for a in v1_accounts]
+    assert acc1_id in v1_account_ids
+    assert acc2_id not in v1_account_ids
+
+    # 5. Fresh viewer tries to access acc2 detail -> 404 Not Found (tenant isolated)
+    assert client.get(f"/api/cloud-accounts/{acc2_id}", headers=fresh_headers).status_code == 404
+
+    # 6. Admin user -> sees both accounts
+    admin_user = db_session.query(User).join(User.roles).filter(Role.name == "ADMIN").first()
+    headers_admin = auth_header_for_user(admin_user)
+    admin_accounts = client.get("/api/cloud-accounts", headers=headers_admin).json()
+    admin_account_ids = [a["id"] for a in admin_accounts]
+    assert acc1_id in admin_account_ids
+    assert acc2_id in admin_account_ids
+
+    # 7. Security Analyst -> has access to list cloud accounts
+    analyst_user = create_test_user(db_session, "analyst_rbac_user", "analyst_rbac@test.com", "SECURITY_ANALYST")
+    headers_analyst = auth_header_for_user(analyst_user)
+    analyst_res = client.get("/api/cloud-accounts", headers=headers_analyst)
+    assert analyst_res.status_code == 200
+
+
+def test_strict_tenant_isolation_unowned_accounts_admin_only(client, db_session):
+    """
+    Verifies strict tenant isolation for unowned/legacy accounts (user_id IS NULL):
+    - Unauthenticated GET /api/cloud-accounts -> 401
+    - Unowned account created with user_id=None
+    - VIEWER cannot list unowned accounts (hidden from list)
+    - VIEWER cannot retrieve unowned account GET /api/cloud-accounts/{unowned_id} -> 404
+    - VIEWER cannot update unowned account PATCH /api/cloud-accounts/{unowned_id} -> 404
+    - VIEWER cannot delete unowned account DELETE /api/cloud-accounts/{unowned_id} -> 404
+    - VIEWER cannot test connection on unowned account -> 404
+    - VIEWER cannot trigger scan on unowned account -> 404
+    - VIEWER can list and access their own owned account
+    - ADMIN can list and retrieve all accounts including unowned accounts (user_id IS NULL)
+    """
+    # Create unowned account (legacy/system account with user_id=None)
+    unowned_acc = CloudAccount(
+        id=uuid.uuid4(),
+        name="Legacy Unowned Account",
+        provider="AWS",
+        account_identifier="000011112222",
+        default_region="us-east-1",
+        credential_mode="ENVIRONMENT",
+        role_arn=None,
+        external_id="cspm-ext-unowned-01",
+        user_id=None,
+        is_active=True,
+    )
+    db_session.add(unowned_acc)
+    db_session.commit()
+
+    # Create VIEWER user and an owned account
+    viewer = create_test_user(db_session, "strict_viewer_user", "strict_viewer@test.com", "VIEWER")
+    viewer_headers = auth_header_for_user(viewer)
+
+    create_res = client.post(
+        "/api/cloud-accounts",
+        json={
+            "name": "Viewer Owned Account",
+            "provider": "AWS",
+            "account_identifier": "999988887777",
+            "default_region": "us-east-1",
+            "credential_mode": "ENVIRONMENT",
+        },
+        headers=viewer_headers,
+    )
+    assert create_res.status_code == 201
+    viewer_acc_id = create_res.json()["id"]
+
+    # 1. Unauthenticated request -> 401
+    assert client.get("/api/cloud-accounts").status_code == 401
+    assert client.get(f"/api/cloud-accounts/{unowned_acc.id}").status_code == 401
+
+    # 2. VIEWER listing -> sees ONLY their owned account, unowned is HIDDEN
+    viewer_list_res = client.get("/api/cloud-accounts", headers=viewer_headers)
+    assert viewer_list_res.status_code == 200
+    listed_ids = [a["id"] for a in viewer_list_res.json()]
+    assert viewer_acc_id in listed_ids
+    assert str(unowned_acc.id) not in listed_ids
+
+    # 3. VIEWER retrieving unowned account -> 404 Not Found
+    get_unowned_res = client.get(f"/api/cloud-accounts/{unowned_acc.id}", headers=viewer_headers)
+    assert get_unowned_res.status_code == 404
+
+    # 4. VIEWER updating unowned account -> 404 Not Found
+    patch_res = client.patch(
+        f"/api/cloud-accounts/{unowned_acc.id}",
+        json={"name": "Hacked Unowned Account"},
+        headers=viewer_headers,
+    )
+    assert patch_res.status_code == 404
+
+    # 5. VIEWER deleting unowned account -> 404 Not Found
+    delete_res = client.delete(f"/api/cloud-accounts/{unowned_acc.id}", headers=viewer_headers)
+    assert delete_res.status_code == 404
+
+    # 6. VIEWER testing connection on unowned account -> 404 Not Found
+    test_conn_res = client.post(
+        f"/api/cloud-accounts/{unowned_acc.id}/test-connection",
+        headers=viewer_headers,
+    )
+    assert test_conn_res.status_code == 404
+
+    # 7. VIEWER triggering scan on unowned account -> 404 Not Found
+    scan_res = client.post(
+        "/api/scans",
+        json={"account_id": str(unowned_acc.id)},
+        headers=viewer_headers,
+    )
+    assert scan_res.status_code == 404
+
+    # 8. VIEWER can access their own account
+    get_owned_res = client.get(f"/api/cloud-accounts/{viewer_acc_id}", headers=viewer_headers)
+    assert get_owned_res.status_code == 200
+    assert get_owned_res.json()["id"] == viewer_acc_id
+
+    # 9. ADMIN can list and retrieve all accounts, including unowned accounts
+    admin_user = db_session.query(User).join(User.roles).filter(Role.name == "ADMIN").first()
+    admin_headers = auth_header_for_user(admin_user)
+
+    admin_list_res = client.get("/api/cloud-accounts", headers=admin_headers)
+    assert admin_list_res.status_code == 200
+    admin_listed_ids = [a["id"] for a in admin_list_res.json()]
+    assert str(unowned_acc.id) in admin_listed_ids
+    assert viewer_acc_id in admin_listed_ids
+
+    admin_get_unowned = client.get(f"/api/cloud-accounts/{unowned_acc.id}", headers=admin_headers)
+    assert admin_get_unowned.status_code == 200
+    assert admin_get_unowned.json()["id"] == str(unowned_acc.id)

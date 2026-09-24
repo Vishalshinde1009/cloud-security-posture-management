@@ -133,6 +133,27 @@ class AuthService:
             db.add(viewer_role)
             db.flush()
 
+        # Ensure VIEWER has read:accounts and baseline permissions assigned
+        existing_perm_names = {p.name for p in viewer_role.permissions}
+        if "read:accounts" not in existing_perm_names:
+            from app.models.auth import Permission
+            viewer_perms_data = [
+                ("read:findings", "View detected security misconfigurations"),
+                ("read:scans", "View scan history and metrics"),
+                ("read:accounts", "View cloud accounts"),
+                ("read:rules", "View security detection rules"),
+                ("download:reports", "Generate and export PDF security reports"),
+            ]
+            for p_name, p_desc in viewer_perms_data:
+                if p_name not in existing_perm_names:
+                    perm = db.query(Permission).filter(Permission.name == p_name).first()
+                    if not perm:
+                        perm = Permission(id=uuid.uuid4(), name=p_name, description=p_desc)
+                        db.add(perm)
+                        db.flush()
+                    viewer_role.permissions.append(perm)
+            db.flush()
+
         # 6. Hash password securely with bcrypt
         password_hash = get_password_hash(password)
 

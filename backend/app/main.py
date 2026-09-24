@@ -33,6 +33,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"Execution Mode: {settings.CSPM_MODE.upper()}")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
 
+    # Ensure baseline roles, permissions, security rules, and initial admin are seeded
+    try:
+        from app.database.session import SessionLocal
+        from app.database.seed import seed_database
+        with SessionLocal() as db:
+            seed_database(db=db)
+        logger.info("Database baseline roles, permissions, and security rules verified.")
+    except Exception as e:
+        logger.warning(f"Database baseline seed check encountered non-fatal error: {e}")
+
     # Phase 9B: Start background monitoring scheduler (only if enabled)
     if settings.CSPM_MONITORING_ENABLED:
         from app.database.session import SessionLocal

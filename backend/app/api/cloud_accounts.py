@@ -162,8 +162,7 @@ def list_cloud_accounts(
     """
     query = db.query(CloudAccount)
     if not is_admin(current_user):
-        from sqlalchemy import or_
-        query = query.filter(or_(CloudAccount.user_id == current_user.id, CloudAccount.user_id.is_(None)))
+        query = query.filter(CloudAccount.user_id == current_user.id)
 
     accounts = query.order_by(desc(CloudAccount.created_at)).all()
     results = []

@@ -155,8 +155,8 @@ def verify_account_access(db: Session, user: User, account_id: uuid.UUID):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Cloud account not found.",
         )
-    if not is_admin(user) and acc.user_id is not None and acc.user_id != user.id:
-        # Non-admin cannot access another user's cloud account
+    if not is_admin(user) and acc.user_id != user.id:
+        # Non-admin cannot access another user's or unowned cloud account
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Cloud account not found.",
